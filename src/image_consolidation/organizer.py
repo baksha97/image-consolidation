@@ -90,9 +90,9 @@ def _same_device(src: Path, dst_dir: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def _transfer(src: Path, dest: Path, mode: str, dry_run: bool) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return
+    dest.parent.mkdir(parents=True, exist_ok=True)
     if mode == "hardlink":
         if _same_device(src, dest.parent):
             os.link(src, dest)
