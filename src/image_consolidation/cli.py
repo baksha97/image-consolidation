@@ -35,6 +35,7 @@ from .deduplicator import run_dedupe
 from .selector import run_select
 from .organizer import run_organize
 from .reporter import generate_report
+from .exif_checker import check_exif_mismatches
 
 console = Console()
 
@@ -50,20 +51,22 @@ app = typer.Typer(
 # Enums for constrained options
 # ---------------------------------------------------------------------------
 
+
 class OrganizeMode(str, Enum):
-    copy     = "copy"
-    move     = "move"
+    copy = "copy"
+    move = "move"
     hardlink = "hardlink"
 
 
 class FolderStructure(str, Enum):
-    year_month     = "YYYY/MM"
+    year_month = "YYYY/MM"
     year_month_day = "YYYY/MM/DD"
 
 
 # ---------------------------------------------------------------------------
 # Shared config builder
 # ---------------------------------------------------------------------------
+
 
 def _load_config(
     config_path: Path | None,
@@ -82,7 +85,9 @@ def _load_config(
     if config_path:
         cfg = Config.from_toml(config_path)
     elif sources:
-        cfg = Config.default_with_sources([str(s) for s in sources], str(output or "output"))
+        cfg = Config.default_with_sources(
+            [str(s) for s in sources], str(output or "output")
+        )
     else:
         cfg = Config()
 
@@ -120,45 +125,100 @@ def _load_config(
 # Shared option defaults (Annotated aliases)
 # ---------------------------------------------------------------------------
 
-DbOpt         = Annotated[Path, typer.Option("--db", help="Path to the SQLite state database.", show_default=True)]
-ConfigOpt     = Annotated[Optional[Path], typer.Option("--config", exists=True, help="TOML config file (overrides CLI flags).")]
-WorkersOpt    = Annotated[Optional[int], typer.Option("--workers", help="Parallel worker threads (overrides config).")]
-DryRunOpt     = Annotated[bool, typer.Option("--dry-run", help="Preview changes without touching the filesystem.")]
-FreshOpt      = Annotated[bool, typer.Option("--fresh", help="Re-ingest all files, ignoring previous state.")]
-SourcePriOpt  = Annotated[Optional[list[str]], typer.Option("--source-priority", metavar="PATH=SCORE", help="Assign priority to a source, e.g. /Volumes/Lightroom=10 (repeatable).")]
+DbOpt = Annotated[
+    Path,
+    typer.Option("--db", help="Path to the SQLite state database.", show_default=True),
+]
+ConfigOpt = Annotated[
+    Optional[Path],
+    typer.Option(
+        "--config", exists=True, help="TOML config file (overrides CLI flags)."
+    ),
+]
+WorkersOpt = Annotated[
+    Optional[int],
+    typer.Option("--workers", help="Parallel worker threads (overrides config)."),
+]
+DryRunOpt = Annotated[
+    bool,
+    typer.Option("--dry-run", help="Preview changes without touching the filesystem."),
+]
+FreshOpt = Annotated[
+    bool, typer.Option("--fresh", help="Re-ingest all files, ignoring previous state.")
+]
+SourcePriOpt = Annotated[
+    Optional[list[str]],
+    typer.Option(
+        "--source-priority",
+        metavar="PATH=SCORE",
+        help="Assign priority to a source, e.g. /Volumes/Lightroom=10 (repeatable).",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------
 # run — full pipeline
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def run(
-    sources:          Annotated[Optional[list[Path]], typer.Argument(help="Source directories to scan.")] = None,
-    output:           Annotated[Optional[Path], typer.Option("-o", "--output", help="Output directory.")] = None,
-    config:           ConfigOpt = None,
-    db:               DbOpt = Path("imgc.db"),
-    workers:          WorkersOpt = None,
-    dry_run:          DryRunOpt = False,
-    mode:             Annotated[Optional[OrganizeMode], typer.Option(help="File transfer mode.")] = None,
-    hardlink:         Annotated[bool, typer.Option("--hardlink", help="Shorthand for --mode hardlink.")] = False,
-    phash_threshold:  Annotated[Optional[int], typer.Option(help="Hamming distance threshold for near-dupes.")] = None,
-    exact_only:       Annotated[bool, typer.Option("--exact-only", help="Skip perceptual hashing (exact dupes only).")] = False,
-    no_videos:        Annotated[bool, typer.Option("--no-videos", help="Ignore video files.")] = False,
-    structure:        Annotated[Optional[FolderStructure], typer.Option(help="Output folder structure.")] = None,
-    source_priority:  SourcePriOpt = None,
-    skip_report:      Annotated[bool, typer.Option("--skip-report", help="Don't generate a report at the end.")] = False,
+    sources: Annotated[
+        Optional[list[Path]], typer.Argument(help="Source directories to scan.")
+    ] = None,
+    output: Annotated[
+        Optional[Path], typer.Option("-o", "--output", help="Output directory.")
+    ] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    workers: WorkersOpt = None,
+    dry_run: DryRunOpt = False,
+    mode: Annotated[
+        Optional[OrganizeMode], typer.Option(help="File transfer mode.")
+    ] = None,
+    hardlink: Annotated[
+        bool, typer.Option("--hardlink", help="Shorthand for --mode hardlink.")
+    ] = False,
+    phash_threshold: Annotated[
+        Optional[int], typer.Option(help="Hamming distance threshold for near-dupes.")
+    ] = None,
+    exact_only: Annotated[
+        bool,
+        typer.Option(
+            "--exact-only", help="Skip perceptual hashing (exact dupes only)."
+        ),
+    ] = False,
+    no_videos: Annotated[
+        bool, typer.Option("--no-videos", help="Ignore video files.")
+    ] = False,
+    structure: Annotated[
+        Optional[FolderStructure], typer.Option(help="Output folder structure.")
+    ] = None,
+    source_priority: SourcePriOpt = None,
+    skip_report: Annotated[
+        bool, typer.Option("--skip-report", help="Don't generate a report at the end.")
+    ] = False,
 ) -> None:
     """[bold]Run the full pipeline[/bold]: ingest → hash → dedupe → select → organize → report."""
     cfg = _load_config(
-        config_path=config, db_path=db, sources=sources, output=output,
-        workers=workers, mode=mode, hardlink=hardlink, phash_threshold=phash_threshold,
-        exact_only=exact_only, no_videos=no_videos, structure=structure,
+        config_path=config,
+        db_path=db,
+        sources=sources,
+        output=output,
+        workers=workers,
+        mode=mode,
+        hardlink=hardlink,
+        phash_threshold=phash_threshold,
+        exact_only=exact_only,
+        no_videos=no_videos,
+        structure=structure,
         source_priority=source_priority,
     )
 
     if not cfg.sources.paths:
-        console.print("[red]Error:[/red] No source directories specified. Pass paths as arguments or use --config.")
+        console.print(
+            "[red]Error:[/red] No source directories specified. Pass paths as arguments or use --config."
+        )
         raise typer.Exit(code=1)
 
     _run_pipeline(cfg, dry_run=dry_run, skip_report=skip_report)
@@ -193,7 +253,9 @@ def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
 
             console.rule("[bold blue]Stage 5/5 — Organize[/bold blue]")
             if dry_run:
-                console.print("[yellow]DRY RUN — no files will be moved/copied.[/yellow]")
+                console.print(
+                    "[yellow]DRY RUN — no files will be moved/copied.[/yellow]"
+                )
             s = run_organize(db, cfg, dry_run=dry_run)
             run_summary["organize"] = s
             _print_summary(s)
@@ -201,8 +263,11 @@ def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
             if not skip_report:
                 console.rule("[bold blue]Report[/bold blue]")
                 generate_report(
-                    db=db, run_id=run_id, run_summary=run_summary,
-                    output_dir=cfg.output.directory, run_started=run_started,
+                    db=db,
+                    run_id=run_id,
+                    run_summary=run_summary,
+                    output_dir=cfg.output.directory,
+                    run_started=run_started,
                 )
 
             db.finish_run(run_id, "completed")
@@ -226,27 +291,36 @@ def _print_summary(summary: dict) -> None:
 # Individual stage commands
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def ingest(
-    sources:         Annotated[Optional[list[Path]], typer.Argument(help="Source directories to scan.")] = None,
-    config:          ConfigOpt = None,
-    db:              DbOpt = Path("imgc.db"),
-    workers:         WorkersOpt = None,
-    no_videos:       Annotated[bool, typer.Option("--no-videos")] = False,
+    sources: Annotated[
+        Optional[list[Path]], typer.Argument(help="Source directories to scan.")
+    ] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    workers: WorkersOpt = None,
+    no_videos: Annotated[bool, typer.Option("--no-videos")] = False,
     source_priority: SourcePriOpt = None,
-    fresh:           FreshOpt = False,
+    fresh: FreshOpt = False,
 ) -> None:
     """Scan source directories and populate the database."""
-    cfg = _load_config(config, db, sources=sources, workers=workers,
-                       no_videos=no_videos, source_priority=source_priority)
+    cfg = _load_config(
+        config,
+        db,
+        sources=sources,
+        workers=workers,
+        no_videos=no_videos,
+        source_priority=source_priority,
+    )
     with Database(cfg.db_path) as db_conn:
         _print_summary(run_ingest(db_conn, cfg, incremental=not fresh))
 
 
 @app.command(name="hash")
 def hash_cmd(
-    config:  ConfigOpt = None,
-    db:      DbOpt = Path("imgc.db"),
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
     workers: WorkersOpt = None,
 ) -> None:
     """Compute SHA-256 + perceptual hashes for ingested files."""
@@ -257,21 +331,25 @@ def hash_cmd(
 
 @app.command()
 def dedupe(
-    config:          ConfigOpt = None,
-    db:              DbOpt = Path("imgc.db"),
-    phash_threshold: Annotated[Optional[int], typer.Option(help="Hamming distance threshold.")] = None,
-    exact_only:      Annotated[bool, typer.Option("--exact-only")] = False,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    phash_threshold: Annotated[
+        Optional[int], typer.Option(help="Hamming distance threshold.")
+    ] = None,
+    exact_only: Annotated[bool, typer.Option("--exact-only")] = False,
 ) -> None:
     """Cluster duplicates using exact and perceptual hashing."""
-    cfg = _load_config(config, db, phash_threshold=phash_threshold, exact_only=exact_only)
+    cfg = _load_config(
+        config, db, phash_threshold=phash_threshold, exact_only=exact_only
+    )
     with Database(cfg.db_path) as db_conn:
         _print_summary(run_dedupe(db_conn, cfg))
 
 
 @app.command()
 def select(
-    config:          ConfigOpt = None,
-    db:              DbOpt = Path("imgc.db"),
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
     source_priority: SourcePriOpt = None,
 ) -> None:
     """Score files and mark the best version in each duplicate group."""
@@ -282,25 +360,30 @@ def select(
 
 @app.command()
 def organize(
-    output:    Annotated[Optional[Path], typer.Option("-o", "--output")] = None,
-    config:    ConfigOpt = None,
-    db:        DbOpt = Path("imgc.db"),
-    dry_run:   DryRunOpt = False,
-    mode:      Annotated[Optional[OrganizeMode], typer.Option()] = None,
-    hardlink:  Annotated[bool, typer.Option("--hardlink")] = False,
+    output: Annotated[Optional[Path], typer.Option("-o", "--output")] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    dry_run: DryRunOpt = False,
+    mode: Annotated[Optional[OrganizeMode], typer.Option()] = None,
+    hardlink: Annotated[bool, typer.Option("--hardlink")] = False,
     structure: Annotated[Optional[FolderStructure], typer.Option()] = None,
 ) -> None:
     """Copy/move/link selected files to the output directory."""
-    cfg = _load_config(config, db, output=output, mode=mode, hardlink=hardlink, structure=structure)
+    cfg = _load_config(
+        config, db, output=output, mode=mode, hardlink=hardlink, structure=structure
+    )
     with Database(cfg.db_path) as db_conn:
         _print_summary(run_organize(db_conn, cfg, dry_run=dry_run))
 
 
 @app.command()
 def report(
-    output: Annotated[Path, typer.Option("-o", "--output", help="Output directory (for report placement).")] = Path("output"),
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Output directory (for report placement)."),
+    ] = Path("output"),
     config: ConfigOpt = None,
-    db:     DbOpt = Path("imgc.db"),
+    db: DbOpt = Path("imgc.db"),
 ) -> None:
     """Generate a Markdown + JSON report from current DB state."""
     cfg = _load_config(config, db, output=output)
@@ -308,9 +391,27 @@ def report(
         last = db_conn.last_run()
         run_id = last["id"] if last else 0
         generate_report(
-            db=db_conn, run_id=run_id, run_summary={},
-            output_dir=cfg.output.directory, run_started=datetime.utcnow(),
+            db=db_conn,
+            run_id=run_id,
+            run_summary={},
+            output_dir=cfg.output.directory,
+            run_started=datetime.utcnow(),
         )
+
+
+@app.command(name="check-exif")
+def check_exif(
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Output directory (for report placement)."),
+    ] = Path("output"),
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+) -> None:
+    """Identify EXIF mismatches among duplicate groups and generate a report."""
+    cfg = _load_config(config, db, output=output)
+    with Database(cfg.db_path) as db_conn:
+        check_exif_mismatches(db_conn, cfg, cfg.output.directory)
 
 
 @app.command()
@@ -331,23 +432,31 @@ def status(
         t.add_column("Metric")
         t.add_column("Value", justify="right")
         for k, v in stats.items():
-            t.add_row(k.replace("_", " ").title(), f"{v:,}" if isinstance(v, int) else str(v))
+            t.add_row(
+                k.replace("_", " ").title(), f"{v:,}" if isinstance(v, int) else str(v)
+            )
         console.print(t)
 
         if sources:
             st = Table(title="Sources")
             st.add_column("Source")
             st.add_column("Total", justify="right")
-            st.add_column("Kept",  justify="right")
+            st.add_column("Kept", justify="right")
             st.add_column("Dupes", justify="right")
             for row in sources:
-                st.add_row(row["source"], f"{row['total']:,}", f"{row['kept']:,}", f"{row['dupes']:,}")
+                st.add_row(
+                    row["source"],
+                    f"{row['total']:,}",
+                    f"{row['kept']:,}",
+                    f"{row['dupes']:,}",
+                )
             console.print(st)
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     app()
