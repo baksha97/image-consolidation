@@ -36,6 +36,7 @@ from .selector import run_select
 from .organizer import run_organize
 from .reporter import generate_report
 from .exif_checker import check_exif_mismatches
+from .exif_fixer import fix_exif_mismatches
 
 console = Console()
 
@@ -401,17 +402,30 @@ def report(
 
 @app.command(name="check-exif")
 def check_exif(
-    output: Annotated[
-        Path,
-        typer.Option("-o", "--output", help="Output directory (for report placement)."),
-    ] = Path("output"),
     config: ConfigOpt = None,
     db: DbOpt = Path("imgc.db"),
 ) -> None:
     """Identify EXIF mismatches among duplicate groups and generate a report."""
-    cfg = _load_config(config, db, output=output)
+    cfg = _load_config(config, db)
     with Database(cfg.db_path) as db_conn:
         check_exif_mismatches(db_conn, cfg, cfg.output.directory)
+
+
+@app.command(name="fix-exif")
+def fix_exif(
+    trust_source: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Prioritize this source path prefix for the correct EXIF data."
+        ),
+    ] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+) -> None:
+    """Fix EXIF mismatches among duplicate groups by copying metadata from the best source."""
+    cfg = _load_config(config, db)
+    with Database(cfg.db_path) as db_conn:
+        fix_exif_mismatches(db_conn, cfg, trust_source)
 
 
 @app.command()
