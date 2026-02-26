@@ -1,4 +1,4 @@
-"""Hash stage — SHA-256 (exact) + dHash (perceptual) for all ingested images."""
+"""Hash stage — SHA-256 (exact) for all ingested files; dHash (perceptual) for images only."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _process_file(path_str: str) -> tuple[str, str | None]:
 
 def run_hash(db: Database, cfg: Config) -> dict:
     """
-    Compute SHA-256 + dHash for all files in status='ingested'.
+    Compute SHA-256 for all files in status='ingested'; also dHash for images.
     Already-hashed files are skipped automatically (incremental).
 
     Returns a summary dict.

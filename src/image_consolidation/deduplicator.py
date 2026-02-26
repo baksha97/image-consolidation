@@ -100,6 +100,16 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
             if fhash:
                 hash_to_ids[fhash].append(file_id)
 
+    # Also collect hashed videos for exact (SHA-256) dedup
+    console.print("[bold cyan]Pass 1b:[/bold cyan] collecting hashed videos…")
+    for batch in db.iter_all_hashed_videos():
+        for row in batch:
+            file_id = row["id"]
+            fhash = row["file_hash"]
+            all_ids.append(file_id)
+            if fhash:
+                hash_to_ids[fhash].append(file_id)
+
     for fhash, ids in hash_to_ids.items():
         if len(ids) > 1:
             summary["exact_groups"] += 1

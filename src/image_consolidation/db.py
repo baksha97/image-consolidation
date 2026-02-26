@@ -288,7 +288,19 @@ class Database:
         last_id = -1
         while True:
             rows = self.conn.execute(
-                "SELECT * FROM files WHERE status='ingested' AND is_video=0 AND id > ? ORDER BY id ASC LIMIT ?",
+                "SELECT * FROM files WHERE status='ingested' AND id > ? ORDER BY id ASC LIMIT ?",
+                (last_id, batch),
+            ).fetchall()
+            if not rows:
+                break
+            yield rows
+            last_id = rows[-1]["id"]
+
+    def iter_all_hashed_videos(self, batch: int = 5000) -> Iterator[list[sqlite3.Row]]:
+        last_id = -1
+        while True:
+            rows = self.conn.execute(
+                "SELECT id, file_hash FROM files WHERE file_hash IS NOT NULL AND is_video=1 AND id > ? ORDER BY id ASC LIMIT ?",
                 (last_id, batch),
             ).fetchall()
             if not rows:
@@ -317,10 +329,6 @@ class Database:
                 "SELECT id, phash, file_hash FROM files WHERE phash IS NOT NULL AND is_video=0 AND id > ? ORDER BY id ASC LIMIT ?",
                 (last_id, batch),
             ).fetchall()
-            if not rows:
-                break
-            yield rows
-            last_id = rows[-1]["id"]
             if not rows:
                 break
             yield rows

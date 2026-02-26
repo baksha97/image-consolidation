@@ -419,13 +419,14 @@ def fix_exif(
             help="Prioritize this source path prefix for the correct EXIF data."
         ),
     ] = None,
+    dry_run: DryRunOpt = False,
     config: ConfigOpt = None,
     db: DbOpt = Path("imgc.db"),
 ) -> None:
     """Fix EXIF mismatches among duplicate groups by copying metadata from the best source."""
     cfg = _load_config(config, db)
     with Database(cfg.db_path) as db_conn:
-        fix_exif_mismatches(db_conn, cfg, trust_source)
+        fix_exif_mismatches(db_conn, cfg, trust_source, dry_run)
 
 
 @app.command()
