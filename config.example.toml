@@ -1,0 +1,50 @@
+# image-consolidation example config
+# Copy to config.toml and adjust for your setup
+
+[sources]
+paths = [
+    "/Volumes/ExternalDrive/Photos",
+    "~/Pictures",
+    "~/Desktop/iPhone Backup",
+]
+
+# Optional: assign priority scores to sources.
+# When duplicates are found, the file from the higher-priority source wins
+# (tiebroken by resolution, then EXIF completeness).
+# Key = path prefix (string match), value = integer priority (higher = preferred).
+[sources.priorities]
+"/Volumes/ExternalDrive/Lightroom" = 10
+"~/Pictures/Masters"               = 8
+"~/Desktop/iPhone Backup"          = 3
+
+[output]
+directory    = "~/Photos-Organized"
+structure    = "YYYY/MM"      # YYYY/MM or YYYY/MM/DD
+mode         = "copy"         # copy | move | hardlink
+unsorted_dir = "unsorted"     # subdirectory for files with no recoverable date
+
+[dedupe]
+phash_threshold = 8   # Hamming distance (0=identical, ≤10 = near-duplicate)
+exact_only      = false  # true = skip perceptual hash, only catch bit-identical files
+
+[formats]
+include_videos = true
+video_mode     = "metadata"   # metadata (fast, stat-only) | skip
+
+image_extensions = [
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif",
+    ".heic", ".heif", ".webp",
+    ".raw", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2", ".raf",
+    ".pef", ".srw", ".x3f",
+]
+video_extensions = [
+    ".mp4", ".mov", ".avi", ".mkv", ".m4v",
+    ".3gp", ".mts", ".m2ts", ".wmv",
+]
+sidecar_extensions = [
+    ".xmp", ".dop", ".pp3", ".aae", ".thm",
+]
+
+[performance]
+workers    = 12    # parallel threads for hashing/EXIF extraction
+batch_size = 500   # DB write batch size
