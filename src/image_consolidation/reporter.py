@@ -164,6 +164,25 @@ def generate_report(
             )
         lines.append("")
 
+        lines += [
+            "## Source Uniqueness",
+            "",
+            "> **Exclusive** — no counterpart found in any other source (true unique content).  ",
+            "> **Won** — exists in multiple sources; this source's copy scored highest.  ",
+            "> **Lost** — exists in multiple sources; another source's copy was preferred.",
+            "",
+            "| Source | Exclusive | Won vs. counterpart | Lost to counterpart |",
+            "|--------|-----------|---------------------|---------------------|",
+        ]
+        for row in sources:
+            lines.append(
+                f"| `{row['source']}` "
+                f"| {row['exclusive']:,} "
+                f"| {row['won_vs_counterpart']:,} "
+                f"| {row['dupes']:,} |"
+            )
+        lines.append("")
+
     # Top duplicate groups
     if top_groups:
         lines += [
@@ -196,7 +215,7 @@ def generate_report(
         "elapsed_seconds": elapsed.total_seconds(),
         "this_run": run_summary,
         "cumulative": stats,
-        "sources": [dict(r) for r in sources],
+        "sources": [dict(r) for r in sources],  # includes exclusive, won_vs_counterpart
         "top_duplicate_groups": [dict(r) for r in top_groups],
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

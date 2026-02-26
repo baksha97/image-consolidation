@@ -458,7 +458,9 @@ class Database:
             """SELECT source,
                       COUNT(*) as total,
                       SUM(CASE WHEN is_best=1 THEN 1 ELSE 0 END) as kept,
-                      SUM(CASE WHEN group_id IS NOT NULL AND is_best=0 THEN 1 ELSE 0 END) as dupes
+                      SUM(CASE WHEN group_id IS NOT NULL AND is_best=0 THEN 1 ELSE 0 END) as dupes,
+                      SUM(CASE WHEN group_id IS NULL  AND is_best=1 THEN 1 ELSE 0 END) as exclusive,
+                      SUM(CASE WHEN group_id IS NOT NULL AND is_best=1 THEN 1 ELSE 0 END) as won_vs_counterpart
                FROM files GROUP BY source ORDER BY total DESC"""
         ).fetchall()
 
