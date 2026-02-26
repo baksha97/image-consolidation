@@ -149,7 +149,7 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
                 _transfer(src, dest, mode=cfg.output.mode, dry_run=dry_run)
                 summary["bytes_transferred"] += row["size"] or 0
 
-                if cfg.output.unsorted_dir in str(dest):
+                if dest.is_relative_to(out_dir / cfg.output.unsorted_dir):
                     summary["unsorted"] += 1
                 else:
                     summary["organized"] += 1

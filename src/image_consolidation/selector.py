@@ -97,6 +97,7 @@ def run_select(db: Database, cfg: Config) -> dict:
     ):
         best_id: int | None = None
         best_score: float = -1.0
+        scores: dict[int, float] = {}
 
         for row in group_rows:
             score = compute_score(
@@ -109,6 +110,7 @@ def run_select(db: Database, cfg: Config) -> dict:
                 source_priority=cfg.source_priority(row["path"]),
                 max_source_priority=max_priority,
             )
+            scores[row["id"]] = score
             if score > best_score:
                 best_score = score
                 best_id = row["id"]
@@ -118,16 +120,7 @@ def run_select(db: Database, cfg: Config) -> dict:
 
         summary["groups_scored"] += 1
         for row in group_rows:
-            score = compute_score(
-                width=row["width"],
-                height=row["height"],
-                fmt=row["format"] or "",
-                exif_date=row["exif_date"],
-                exif_make=row["exif_make"],
-                exif_model=row["exif_model"],
-                source_priority=cfg.source_priority(row["path"]),
-                max_source_priority=max_priority,
-            )
+            score = scores[row["id"]]
             if row["id"] == best_id:
                 db.mark_best(row["id"], score)
             else:

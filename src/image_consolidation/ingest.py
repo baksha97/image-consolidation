@@ -242,29 +242,31 @@ def run_ingest(db: Database, cfg: Config, incremental: bool = True) -> dict:
         _flush(force=True)
 
         # Now attach sidecars to their masters
-        progress.add_task("Linking sidecars…", total=len(sidecar_files))
+        sc_task = progress.add_task("Linking sidecars…", total=len(sidecar_files))
         for sc_path in sidecar_files:
-            # Find master by stripping sidecar extension
-            # e.g. IMG_001.jpg.xmp → IMG_001.jpg  or  IMG_001.xmp → IMG_001.*
-            if sc_path.stem.lower().endswith(
-                tuple(e.lstrip(".") for e in cfg.formats.image_extensions + cfg.formats.video_extensions)
-            ):
-                master_path = sc_path.parent / sc_path.stem
-            else:
-                # look for master with any supported ext
-                master_path = None
-                for ext in cfg.formats.image_extensions + cfg.formats.video_extensions:
-                    candidate = sc_path.parent / (sc_path.stem + ext)
-                    if candidate.exists():
-                        master_path = candidate
-                        break
+            try:
+                # Find master by stripping sidecar extension
+                # e.g. IMG_001.jpg.xmp → IMG_001.jpg  or  IMG_001.xmp → IMG_001.*
+                if sc_path.stem.lower().endswith(
+                    tuple(e.lstrip(".") for e in cfg.formats.image_extensions + cfg.formats.video_extensions)
+                ):
+                    master_path = sc_path.parent / sc_path.stem
+                else:
+                    # look for master with any supported ext
+                    master_path = None
+                    for ext in cfg.formats.image_extensions + cfg.formats.video_extensions:
+                        candidate = sc_path.parent / (sc_path.stem + ext)
+                        if candidate.exists():
+                            master_path = candidate
+                            break
 
-            if master_path is None:
-                continue
-            row = db.get_file_by_path(str(master_path))
-            if row is None:
-                continue
-            db.upsert_sidecar(row["id"], str(sc_path), sc_path.suffix.lower())
+                if master_path is not None:
+                    row = db.get_file_by_path(str(master_path))
+                    if row is not None:
+                        db.upsert_sidecar(row["id"], str(sc_path), sc_path.suffix.lower())
+            except Exception:
+                summary["errors"] += 1
+            progress.advance(sc_task)
 
         db.commit()
 

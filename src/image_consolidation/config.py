@@ -108,8 +108,12 @@ class Config(BaseModel):
 
     def source_priority(self, path: str) -> int:
         """Return the highest matching priority for a file path."""
+        p = Path(path)
         best = 0
         for prefix, score in self.sources.priorities.items():
-            if path.startswith(prefix):
+            try:
+                p.relative_to(prefix)
                 best = max(best, score)
+            except ValueError:
+                pass
         return best

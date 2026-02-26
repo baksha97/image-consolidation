@@ -265,7 +265,8 @@ class Database:
         ).fetchone()
         if row is None:
             return False
-        return row["size"] == size and abs(row["mtime"] - mtime) < 1.0
+        # 2.0 s tolerance handles FAT32/older-NTFS 2-second mtime granularity
+        return row["size"] == size and abs(row["mtime"] - mtime) < 2.0
 
     def iter_files_needing_hash(self, batch: int = 1000) -> Iterator[list[sqlite3.Row]]:
         offset = 0

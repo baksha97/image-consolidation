@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# uv / virtualenv
+.venv/
+.python-version
+
+# Project runtime files
+imgc.db
+imgc.db-wal
+imgc.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Config with local paths (use config.example.toml as template)
+# config.toml
+
+# Test output
+output/
+reports/
+
+# macOS
+.DS_Store
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
