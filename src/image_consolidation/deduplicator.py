@@ -28,6 +28,7 @@ console = Console()
 # Union-Find
 # ---------------------------------------------------------------------------
 
+
 class UnionFind:
     def __init__(self) -> None:
         self._parent: dict[int, int] = {}
@@ -55,6 +56,7 @@ class UnionFind:
 # Hex hash → numpy uint8 array (8 bytes = 64 bits)
 # ---------------------------------------------------------------------------
 
+
 def _hex_to_vec(hex_str: str) -> np.ndarray:
     # imagehash outputs a 16-char hex for 8×8 dHash
     padded = hex_str.zfill(16)
@@ -64,6 +66,7 @@ def _hex_to_vec(hex_str: str) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def run_dedupe(db: Database, cfg: Config) -> dict:
     """
@@ -88,7 +91,7 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
     all_ids: list[int] = []
     id_to_phash: dict[int, str | None] = {}
 
-    for batch in db.iter_hashed_images():
+    for batch in db.iter_all_hashed_images():
         for row in batch:
             file_id = row["id"]
             fhash = row["file_hash"]
@@ -108,7 +111,9 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
     # Pass 2 — perceptual hash (FAISS BinaryFlat)
     # ------------------------------------------------------------------
     if not cfg.dedupe.exact_only:
-        console.print("[bold cyan]Pass 2:[/bold cyan] near-duplicate detection (FAISS)…")
+        console.print(
+            "[bold cyan]Pass 2:[/bold cyan] near-duplicate detection (FAISS)…"
+        )
 
         # Build FAISS index from valid pHashes
         valid_ids = [i for i in all_ids if id_to_phash.get(i)]
@@ -116,10 +121,12 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
             try:
                 import faiss  # type: ignore[import]
 
-                vectors = np.vstack([
-                    _hex_to_vec(id_to_phash[i])  # type: ignore[arg-type]
-                    for i in valid_ids
-                ]).astype(np.uint8)
+                vectors = np.vstack(
+                    [
+                        _hex_to_vec(id_to_phash[i])  # type: ignore[arg-type]
+                        for i in valid_ids
+                    ]
+                ).astype(np.uint8)
 
                 index = faiss.IndexBinaryFlat(64)  # 64-bit hashes
                 index.add(vectors)
@@ -168,9 +175,7 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
         db.update_group_batch(updates)
 
     # Files that stayed status='hashed' (no group) still need to be marked clustered
-    db.conn.execute(
-        "UPDATE files SET status='clustered' WHERE status='hashed'"
-    )
+    db.conn.execute("UPDATE files SET status='clustered' WHERE status='hashed'")
     db.commit()
 
     return summary

@@ -1,12 +1,13 @@
 # Python
 __pycache__/
+**/__pycache__/**
 *.py[cod]
 *.pyo
 .eggs/
 *.egg-info/
 dist/
 build/
-
+**.pyc
 # uv / virtualenv
 .venv/
 .python-version

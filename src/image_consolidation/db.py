@@ -75,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_files_is_best    ON files(is_best);
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileRecord:
     path: str
@@ -104,6 +105,7 @@ class FileRecord:
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+
 
 class Database:
     def __init__(self, path: Path) -> None:
@@ -222,11 +224,27 @@ class Database:
         now = datetime.utcnow().isoformat()
         rows = [
             (
-                r.path, r.source, r.size, r.mtime, r.file_hash, r.phash,
-                r.width, r.height, r.exif_date, r.exif_make, r.exif_model,
-                r.format, int(r.is_video), r.duration_sec,
-                r.score, r.group_id, int(r.is_best), r.output_path,
-                r.status, r.ingested_at or now, now,
+                r.path,
+                r.source,
+                r.size,
+                r.mtime,
+                r.file_hash,
+                r.phash,
+                r.width,
+                r.height,
+                r.exif_date,
+                r.exif_make,
+                r.exif_model,
+                r.format,
+                int(r.is_video),
+                r.duration_sec,
+                r.score,
+                r.group_id,
+                int(r.is_best),
+                r.output_path,
+                r.status,
+                r.ingested_at or now,
+                now,
             )
             for r in records
         ]
@@ -254,9 +272,7 @@ class Database:
         self.conn.commit()
 
     def get_file_by_path(self, path: str) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM files WHERE path=?", (path,)
-        ).fetchone()
+        return self.conn.execute("SELECT * FROM files WHERE path=?", (path,)).fetchone()
 
     def is_file_unchanged(self, path: str, size: int, mtime: float) -> bool:
         """True if the file is already in the DB with matching size+mtime."""
@@ -269,16 +285,16 @@ class Database:
         return row["size"] == size and abs(row["mtime"] - mtime) < 2.0
 
     def iter_files_needing_hash(self, batch: int = 1000) -> Iterator[list[sqlite3.Row]]:
-        offset = 0
+        last_id = -1
         while True:
             rows = self.conn.execute(
-                "SELECT * FROM files WHERE status='ingested' AND is_video=0 LIMIT ? OFFSET ?",
-                (batch, offset),
+                "SELECT * FROM files WHERE status='ingested' AND is_video=0 AND id > ? ORDER BY id ASC LIMIT ?",
+                (last_id, batch),
             ).fetchall()
             if not rows:
                 break
             yield rows
-            offset += len(rows)
+            last_id = rows[-1]["id"]
 
     def update_hash(self, file_id: int, file_hash: str, phash: str | None) -> None:
         self.conn.execute(
@@ -294,22 +310,28 @@ class Database:
         )
         self.conn.commit()
 
-    def iter_hashed_images(self, batch: int = 5000) -> Iterator[list[sqlite3.Row]]:
-        offset = 0
+    def iter_all_hashed_images(self, batch: int = 5000) -> Iterator[list[sqlite3.Row]]:
+        last_id = -1
         while True:
             rows = self.conn.execute(
-                "SELECT id, phash, file_hash FROM files WHERE status='hashed' AND is_video=0 LIMIT ? OFFSET ?",
-                (batch, offset),
+                "SELECT id, phash, file_hash FROM files WHERE phash IS NOT NULL AND is_video=0 AND id > ? ORDER BY id ASC LIMIT ?",
+                (last_id, batch),
             ).fetchall()
             if not rows:
                 break
             yield rows
-            offset += len(rows)
+            last_id = rows[-1]["id"]
+            if not rows:
+                break
+            yield rows
+            last_id = rows[-1]["id"]
 
     def update_group_batch(self, rows: list[tuple[int | None, int]]) -> None:
         """rows = [(group_id, file_id), ...]"""
         self.conn.executemany(
-            "UPDATE files SET group_id=?, status='clustered' WHERE id=?",
+            """UPDATE files SET group_id=?,
+               status = CASE WHEN status='organized' THEN 'organized' ELSE 'clustered' END
+               WHERE id=?""",
             rows,
         )
         self.conn.commit()
@@ -330,13 +352,17 @@ class Database:
 
     def mark_best(self, file_id: int, score: float) -> None:
         self.conn.execute(
-            "UPDATE files SET is_best=1, score=?, status='selected' WHERE id=?",
+            """UPDATE files SET is_best=1, score=?,
+               status = CASE WHEN status='organized' THEN 'organized' ELSE 'selected' END
+               WHERE id=?""",
             (score, file_id),
         )
 
     def mark_not_best(self, file_id: int, score: float) -> None:
         self.conn.execute(
-            "UPDATE files SET is_best=0, score=?, status='selected' WHERE id=?",
+            """UPDATE files SET is_best=0, score=?,
+               status = CASE WHEN status='organized' THEN 'organized' ELSE 'selected' END
+               WHERE id=?""",
             (score, file_id),
         )
 
@@ -345,18 +371,19 @@ class Database:
 
     def iter_best_files(self, batch: int = 1000) -> Iterator[list[sqlite3.Row]]:
         """Files that won their group and haven't been organized yet."""
-        offset = 0
+        last_id = -1
         while True:
             rows = self.conn.execute(
                 """SELECT * FROM files
-                   WHERE is_best=1 AND status='selected'
-                   LIMIT ? OFFSET ?""",
-                (batch, offset),
+                   WHERE is_best=1 AND status='selected' AND id > ?
+                   ORDER BY id ASC
+                   LIMIT ?""",
+                (last_id, batch),
             ).fetchall()
             if not rows:
                 break
             yield rows
-            offset += len(rows)
+            last_id = rows[-1]["id"]
 
     def mark_organized(self, file_id: int, output_path: str) -> None:
         self.conn.execute(
