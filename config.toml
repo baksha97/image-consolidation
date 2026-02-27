@@ -23,7 +23,7 @@ unsorted_dir = "unsorted"     # subdirectory for files with no recoverable date
 
 [dedupe]
 phash_threshold = 8   # Hamming distance (0=identical, ≤10 = near-duplicate)
-exact_only      = false  # true = skip perceptual hash, only catch bit-identical files
+exact_only      = true  # true = skip perceptual hash, only catch bit-identical files
 
 [formats]
 include_videos = true
