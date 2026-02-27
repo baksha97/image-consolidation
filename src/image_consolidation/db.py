@@ -437,6 +437,20 @@ class Database:
             (output_path, file_id),
         )
 
+    def clear_organized(self, file_id: int) -> None:
+        """Reset a demoted file's organized state after its output copy is deleted."""
+        self.conn.execute(
+            "UPDATE files SET output_path=NULL, status='selected' WHERE id=?",
+            (file_id,),
+        )
+
+    def iter_stale_organized(self) -> list:
+        """Return all files that are organized in the output dir but are no longer winners."""
+        return self.conn.execute(
+            """SELECT id, path, output_path FROM files
+               WHERE is_best=0 AND status='organized' AND output_path IS NOT NULL"""
+        ).fetchall()
+
     # ------------------------------------------------------------------
     # Sidecars
     # ------------------------------------------------------------------

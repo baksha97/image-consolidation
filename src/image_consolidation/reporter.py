@@ -147,6 +147,7 @@ def generate_report(
         lines += [
             f"| Organize | Files organized           | {org_s.get('organized', '—'):,} |",
             f"| Organize | Files → unsorted/         | {org_s.get('unsorted', '—'):,} |",
+            f"| Organize | Stale copies pruned       | {org_s.get('pruned', '—'):,} |",
             f"| Organize | Bytes transferred         | {_fmt_bytes(org_s.get('bytes_transferred', 0))} |",
             f"| Organize | Errors                    | {org_s.get('errors', '—'):,} |",
         ]

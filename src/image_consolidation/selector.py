@@ -2,15 +2,19 @@
 Selector stage — within each duplicate group, pick the best version.
 
 Score = weighted sum of:
-  - Resolution        50%  (pixels / 50 MP ceiling)
-  - Format quality    25%  (RAW > TIFF > PNG > HEIC > JPEG)
-  - EXIF completeness 15%  (has date, make, model)
-  - Source priority   10%  (user-defined ranking)
+  - Resolution        45%  (pixels / 50 MP ceiling)
+  - Date uniqueness   20%  (1 / count of group members sharing the same date;
+                             penalises batch-import copies all stamped with the
+                             same wrong date while rewarding files with organic,
+                             unique capture dates)
+  - Format quality    20%  (RAW > TIFF > PNG > HEIC > JPEG)
+  - EXIF completeness 10%  (has date, make, model)
+  - Source priority    5%  (user-defined ranking)
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections import Counter
 
 from rich.console import Console
 from rich.progress import track
@@ -54,6 +58,7 @@ def compute_score(
     exif_model: str | None,
     source_priority: int,
     max_source_priority: int = 10,
+    date_uniqueness: float = 1.0,
 ) -> float:
     pixels = (width or 0) * (height or 0)
     res_score = min(pixels / _MAX_PIXELS, 1.0)
@@ -67,10 +72,11 @@ def compute_score(
     src_score = source_priority / denom
 
     return (
-        res_score  * 0.50
-        + fmt_score  * 0.25
-        + exif_score * 0.15
-        + src_score  * 0.10
+        res_score        * 0.45
+        + date_uniqueness  * 0.20
+        + fmt_score        * 0.20
+        + exif_score       * 0.10
+        + src_score        * 0.05
     )
 
 
@@ -99,7 +105,17 @@ def run_select(db: Database, cfg: Config) -> dict:
         best_score: float = -1.0
         scores: dict[int, float] = {}
 
+        # Count how many files in this group share each capture date (YYYY-MM-DD).
+        # A date shared by many members is a strong signal of a batch-import
+        # timestamp rather than a genuine capture date.
+        date_counts: Counter = Counter(
+            (row["exif_date"] or "")[:10] for row in group_rows
+        )
+
         for row in group_rows:
+            dk = (row["exif_date"] or "")[:10]
+            date_uniqueness = 1.0 / date_counts[dk]
+
             score = compute_score(
                 width=row["width"],
                 height=row["height"],
@@ -109,6 +125,7 @@ def run_select(db: Database, cfg: Config) -> dict:
                 exif_model=row["exif_model"],
                 source_priority=cfg.source_priority(row["path"]),
                 max_source_priority=max_priority,
+                date_uniqueness=date_uniqueness,
             )
             scores[row["id"]] = score
             if score > best_score:

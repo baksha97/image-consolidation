@@ -102,9 +102,58 @@ def _transfer(src: Path, dest: Path, mode: str, dry_run: bool) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _prune_stale(out_dir: Path, db: Database, dry_run: bool) -> tuple[int, int]:
+    """
+    Delete output-directory copies of files that are no longer winners.
+
+    Safety rule: only delete if the original source file still exists on disk.
+    If the source is gone (move mode, or externally deleted) we leave the output
+    copy alone — it may be the only remaining copy.
+
+    Returns (pruned_count, error_count).
+    """
+    pruned = 0
+    errors = 0
+
+    for row in db.iter_stale_organized():
+        src = Path(row["path"])
+        out = Path(row["output_path"])
+
+        # Guard: if the source is gone this output copy might be the sole survivor.
+        if not src.exists():
+            continue
+
+        # Guard: output must actually be inside our managed directory.
+        try:
+            out.relative_to(out_dir)
+        except ValueError:
+            continue
+
+        try:
+            if not dry_run:
+                if out.exists():
+                    out.unlink()
+                # Remove empty parent directories up to (but not including) out_dir.
+                parent = out.parent
+                while parent != out_dir:
+                    try:
+                        parent.rmdir()  # no-op if non-empty
+                        parent = parent.parent
+                    except OSError:
+                        break
+                db.clear_organized(row["id"])
+            pruned += 1
+        except Exception as e:
+            console.print(f"[red]Error pruning {out}: {e}[/red]")
+            errors += 1
+
+    return pruned, errors
+
+
 def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
     """
-    Copy/move/hard-link best-version files to the output directory.
+    Copy/move/hard-link best-version files to the output directory, then prune
+    any output copies that belong to files that are no longer winners.
 
     dry_run=True → compute destinations and log them, but don't touch the filesystem.
     Returns a summary dict.
@@ -113,6 +162,7 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
         "organized": 0,
         "unsorted": 0,
         "skipped_already_done": 0,
+        "pruned": 0,
         "errors": 0,
         "bytes_transferred": 0,
     }
@@ -205,6 +255,13 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
             except Exception as e:
                 console.print(f"[red]Error organizing {src}: {e}[/red]")
                 summary["errors"] += 1
+
+    # ------------------------------------------------------------------
+    # Prune stale losers from the output directory
+    # ------------------------------------------------------------------
+    pruned, prune_errors = _prune_stale(out_dir, db, dry_run)
+    summary["pruned"] = pruned
+    summary["errors"] += prune_errors
 
     db.commit()
     return summary
