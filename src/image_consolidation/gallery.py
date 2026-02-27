@@ -277,6 +277,62 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: #666;
         }}
         .hidden {{ display: none !important; }}
+        .path-config {{
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 1rem 2rem;
+            margin: 0;
+        }}
+        .path-config h3 {{
+            margin-bottom: 0.75rem;
+            color: #856404;
+            font-size: 1rem;
+        }}
+        .path-fields {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }}
+        .path-field {{
+            display: flex;
+            flex-direction: column;
+        }}
+        .path-field label {{
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #856404;
+            margin-bottom: 0.25rem;
+        }}
+        .path-field input {{
+            padding: 0.5rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.875rem;
+        }}
+        .path-field small {{
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }}
+        .source-path {{
+            color: #0c5460;
+            background: #d1ecf1;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            margin-bottom: 0.5rem;
+            word-break: break-all;
+        }}
+        .output-path {{
+            color: #155724;
+            background: #d4edda;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            margin-bottom: 0.5rem;
+            word-break: break-all;
+        }}
     </style>
 </head>
 <body>
@@ -284,6 +340,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h1>📷 Duplicate Review Gallery</h1>
         <div class="header-stats">
             {total_groups:,} duplicate groups · {total_dupes:,} duplicate files · Generated {timestamp}
+        </div>
+    </div>
+    
+    <div class="path-config">
+        <h3>📁 Path Configuration</h3>
+        <div class="path-fields">
+            <div class="path-field">
+                <label for="outputBase">Output Directory:</label>
+                <input type="text" id="outputBase" value="{output_dir}" readonly>
+                <small>Base path for organized photos (shown as relative paths)</small>
+            </div>
+            <div class="path-field">
+                <label for="sourceBase">Source Directory (optional):</label>
+                <input type="text" id="sourceBase" value="" placeholder="e.g., /mnt/backup/photos">
+                <small>Enter to show full source paths instead of relative</small>
+            </div>
         </div>
     </div>
     
@@ -393,8 +465,61 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }});
         }}
         
-        function openLightbox(src) {{
-            document.getElementById('lightbox-img').src = src;
+        // Path configuration - dynamically resolve paths based on user input
+        function resolvePath(relPath, basePath) {{
+            if (!relPath) return '';
+            if (!basePath) return relPath;
+            // Remove leading ./ or / from relPath to avoid double slashes
+            relPath = relPath.replace(/^\\.\\/|^\\//, '');
+            return basePath.replace(/\\/$/, '') + '/' + relPath;
+        }}
+        
+        function updatePaths() {{
+            const sourceBase = document.getElementById('sourceBase').value.trim();
+            const outputBase = document.getElementById('outputBase').value.trim();
+            
+            document.querySelectorAll('.file-card').forEach(card => {{
+                const sourceRel = card.getAttribute('data-source-rel');
+                const outputRel = card.getAttribute('data-output-rel');
+                
+                // Update source path display
+                const sourcePathEl = card.querySelector('.source-path');
+                if (sourcePathEl && sourceRel) {{
+                    const displayPath = resolvePath(sourceRel, sourceBase);
+                    sourcePathEl.textContent = '📁 Source: ' + displayPath;
+                }}
+                
+                // Update output path display
+                const outputPathEl = card.querySelector('.output-path');
+                if (outputPathEl && outputRel) {{
+                    const displayPath = resolvePath(outputRel, outputBase);
+                    outputPathEl.textContent = '✅ Kept: ' + displayPath;
+                }}
+                
+                // Update image src for thumbnails that failed to load
+                const img = card.querySelector('.thumbnail');
+                if (img && img.getAttribute('data-needs-resolution') === 'true' && outputRel) {{
+                    img.src = resolvePath(outputRel, outputBase);
+                    img.removeAttribute('data-needs-resolution');
+                }}
+            }});
+        }}
+        
+        document.getElementById('sourceBase').addEventListener('input', updatePaths);
+        document.getElementById('outputBase').addEventListener('input', updatePaths);
+        
+        function openLightbox(card) {{
+            const sourceRel = card.getAttribute('data-source-rel');
+            const outputRel = card.getAttribute('data-output-rel');
+            const sourceBase = document.getElementById('sourceBase').value.trim();
+            const outputBase = document.getElementById('outputBase').value.trim();
+            
+            // Prefer source path if available, otherwise output path
+            const relPath = sourceRel || outputRel;
+            const basePath = sourceRel ? sourceBase : outputBase;
+            const fullPath = resolvePath(relPath, basePath);
+            
+            document.getElementById('lightbox-img').src = fullPath;
             document.getElementById('lightbox').classList.add('active');
         }}
         
@@ -476,16 +601,24 @@ def _render_file_card(file_data: dict, output_dir: Path, is_winner: bool) -> str
     """Render a single file card HTML."""
     role_class = "winner" if is_winner else "duplicate"
     
-    # Get relative path for the image src
-    rel_path = _get_relative_path(output_dir, file_data['path'])
+    # Source path (original location)
+    source_path = file_data.get('path', '')
+    source_rel = _get_relative_path(output_dir, source_path)
     
-    # Try to create thumbnail
-    thumbnail_b64 = _create_thumbnail(file_data['path'])
+    # Output path (organized location) - may be same as source if not organized
+    output_path = file_data.get('output_path') or source_path
+    output_rel = _get_relative_path(output_dir, output_path)
+    
+    # Try to create thumbnail from the actual file location
+    thumbnail_b64 = _create_thumbnail(source_path)
     if thumbnail_b64:
         img_src = f"data:image/jpeg;base64,{thumbnail_b64}"
     else:
-        # Fallback to file path
-        img_src = html.escape(rel_path)
+        # Use data attribute for path - JS will resolve based on configuration
+        img_src = ""
+    
+    # Store paths as data attributes for dynamic resolution
+    path_attrs = f'data-source-rel="{html.escape(source_rel or source_path)}" data-output-rel="{html.escape(output_rel or output_path)}"'
     
     # Format metadata
     size = _fmt_bytes(file_data.get('size', 0) or 0)
@@ -497,13 +630,23 @@ def _render_file_card(file_data: dict, output_dir: Path, is_winner: bool) -> str
     camera = ' / '.join(filter(None, [file_data.get('exif_make'), file_data.get('exif_model')])) or '—'
     score = f"{file_data.get('score', 0):.4f}" if file_data.get('score') is not None else '—'
     
-    path_display = html.escape(rel_path)
-    js_path = json.dumps(rel_path)  # Proper JS string escaping
+    # Build path display HTML with data attributes for dynamic resolution
+    source_display = html.escape(source_rel or source_path)
+    output_display = html.escape(output_rel or output_path)
     
-    return f"""<div class="file-card {role_class}">
-    <img class="thumbnail" src="{img_src}" alt="" onclick="openLightbox({js_path})" loading="lazy">
+    paths_html = f"""<div class="source-path" data-rel-path="{html.escape(source_rel or source_path)}" title="Source: {source_display}">
+    📁 Source: {source_display}
+</div>"""
+    
+    if is_winner and output_path != source_path:
+        paths_html += f"""<div class="output-path" data-rel-path="{html.escape(output_rel or output_path)}" title="Output: {output_display}">
+    ✅ Kept: {output_display}
+</div>"""
+    
+    return f"""<div class="file-card {role_class}" {path_attrs}>
+    <img class="thumbnail" src="{img_src}" alt="" loading="lazy" data-needs-resolution="true">
     <div class="file-info">
-        <div class="file-path" title="{path_display}">{path_display}</div>
+        {paths_html}
         <div class="metadata">
             <div class="meta-item">
                 <span class="meta-label">Format</span>
@@ -621,6 +764,7 @@ def generate_gallery(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         items_per_page=items_per_page,
         groups_html='\n'.join(groups_html),
+        output_dir=str(output_dir),
     )
     
     # Write to file
