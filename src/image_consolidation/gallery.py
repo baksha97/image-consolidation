@@ -19,6 +19,7 @@ from io import BytesIO
 from pathlib import Path
 
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from PIL import Image
 
 from .db import Database
@@ -747,12 +748,47 @@ def generate_gallery(
         console.print("[yellow]No duplicate groups found.[/yellow]")
         return output_dir / "reports" / "dup_gallery.html"
     
-    console.print(f"Rendering {len(groups):,} groups with pagination ({items_per_page} per page)…")
+    # Count total files for progress tracking
+    total_files = sum(g['file_count'] for g in groups)
+    console.print(f"Processing {len(groups):,} groups ({total_files:,} files) with pagination ({items_per_page} per page)…")
     
-    # Render all groups
+    # Render all groups with progress tracking
     groups_html = []
-    for i, group in enumerate(groups):
-        groups_html.append(_render_group(group, i, output_dir))
+    files_processed = 0
+    thumbnails_created = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Generating gallery...", total=total_files)
+        
+        for i, group in enumerate(groups):
+            # Process each file in the group
+            group_files_html = []
+            files = sorted(group['files'], key=lambda f: (-f.get('is_best', 0), -(f.get('score') or 0)))
+            
+            for f in files:
+                is_winner = f.get('is_best', False)
+                # Update progress description with current file
+                progress.update(task, description=f"Processing {f.get('path', 'unknown')[:50]}...")
+                group_files_html.append(_render_file_card(f, output_dir, is_winner))
+                files_processed += 1
+                
+                # Count thumbnails created (rough estimate based on image files)
+                ext = Path(f.get('path', '')).suffix.lower()
+                if ext not in ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.mts', '.m2ts', '.wmv'):
+                    thumbnails_created += 1
+                
+                progress.advance(task)
+            
+            # Render the group
+            groups_html.append(_render_group_from_files(group, i, group_files_html))
+    
+    console.print(f"[dim]Processed {files_processed:,} files ({thumbnails_created:,} potential thumbnails)[/dim]")
     
     # Calculate total duplicates
     total_dupes = sum(g['file_count'] - 1 for g in groups)
@@ -781,3 +817,26 @@ def generate_gallery(
     console.print(f"[dim]Open in browser: file://{html_path.absolute()}[/dim]")
     
     return html_path
+
+
+def _render_group_from_files(group: dict, group_index: int, files_html: list[str]) -> str:
+    """Render a group from pre-rendered file HTML."""
+    group_id = group['group_id']
+    file_count = group['file_count']
+    total_bytes = _fmt_bytes(group.get('total_bytes', 0) or 0)
+    is_near_dup = group.get('is_near_dup', False)
+    group_type = 'near' if is_near_dup else 'exact'
+    group_type_label = 'Near-duplicate' if is_near_dup else 'Exact duplicate'
+    
+    return f"""<div class="group" id="group-{group_index}">
+    <div class="group-header">
+        <div>
+            <div class="group-title">Group {group_id}</div>
+            <div class="group-meta">{file_count} files · {total_bytes} total</div>
+        </div>
+        <span class="group-type {group_type}">{group_type_label}</span>
+    </div>
+    <div class="files-grid">
+        {''.join(files_html)}
+    </div>
+</div>"""
