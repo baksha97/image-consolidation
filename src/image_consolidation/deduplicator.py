@@ -44,6 +44,10 @@ class UnionFind:
         if ra != rb:
             self._parent[rb] = ra
 
+    def isolate(self, x: int) -> None:
+        """Remove x from its group so it becomes a singleton root."""
+        self._parent[x] = x
+
     def groups(self, ids: list[int]) -> dict[int, list[int]]:
         """Return {root_id: [member_ids]}."""
         result: dict[int, list[int]] = defaultdict(list)
@@ -61,6 +65,69 @@ def _hex_to_vec(hex_str: str) -> np.ndarray:
     # imagehash outputs a 16-char hex for 8×8 dHash
     padded = hex_str.zfill(16)
     return np.frombuffer(bytes.fromhex(padded), dtype=np.uint8)
+
+
+# ---------------------------------------------------------------------------
+# Super-cluster post-validation
+# ---------------------------------------------------------------------------
+
+
+def _expel_outliers(
+    uf: UnionFind,
+    id_to_phash: dict[int, str | None],
+    threshold: int,
+    min_group_size: int = 3,
+) -> int:
+    """
+    For each group with ≥ min_group_size members, find its medoid (the member
+    with the most neighbours within threshold) and expel any member whose
+    Hamming distance to the medoid exceeds the threshold.
+
+    Expelled members are isolated back to singleton roots in the UnionFind so
+    they receive no group_id and are treated as unique files by the selector.
+
+    Returns the total number of members expelled.
+    """
+    try:
+        import faiss  # type: ignore[import]
+    except ImportError:
+        return 0
+
+    expelled_total = 0
+    groups = uf.groups([i for i in id_to_phash if id_to_phash.get(i)])
+
+    for root, members in groups.items():
+        if len(members) < min_group_size:
+            continue
+
+        valid = [(m, id_to_phash[m]) for m in members if id_to_phash.get(m)]
+        if len(valid) < min_group_size:
+            continue
+
+        ids = [v[0] for v in valid]
+        vecs = np.array([_hex_to_vec(v[1]) for v in valid], dtype=np.uint8)  # type: ignore[arg-type]
+
+        # Build a small FAISS index for this group
+        idx = faiss.IndexBinaryFlat(64)
+        idx.add(vecs)
+
+        # Find the medoid: member with the most neighbours within threshold
+        k = min(len(ids), 20)
+        dists, _ = idx.search(vecs, k)
+        neighbor_counts = (dists <= threshold).sum(axis=1)
+        medoid_pos = int(np.argmax(neighbor_counts))
+        medoid_vec = vecs[medoid_pos : medoid_pos + 1]
+
+        # Compute each member's distance to the medoid via XOR popcount
+        xor = vecs ^ medoid_vec  # broadcast: shape (n, 8)
+        hamming = np.unpackbits(xor, axis=1).sum(axis=1)  # shape (n,)
+
+        for i, mid in enumerate(ids):
+            if int(hamming[i]) > threshold:
+                uf.isolate(mid)
+                expelled_total += 1
+
+    return expelled_total
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +221,27 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
                             continue
                         if dist <= threshold:
                             nbr_id = valid_ids[nbr_idx]
-                            if uf.find(src_id) != uf.find(nbr_id):
-                                summary["near_groups"] += 1
-                                uf.union(src_id, nbr_id)
+                            uf.union(src_id, nbr_id)
+
+                # Count distinct groups that contain ≥2 FAISS-matched members
+                near_roots: set[int] = set()
+                for vid in valid_ids:
+                    root = uf.find(vid)
+                    near_roots.add(root)
+                # Subtract groups that were already formed by exact matching
+                # (approximation: any multi-member group counts)
+                summary["near_groups"] = sum(
+                    1 for r in near_roots
+                    if sum(1 for v in valid_ids if uf.find(v) == r) > 1
+                )
+
+                # Post-validation: expel chain-linked false positives
+                expelled = _expel_outliers(uf, id_to_phash, threshold)
+                if expelled:
+                    console.print(
+                        f"[yellow]Super-cluster validation: expelled {expelled:,} "
+                        f"false-positive members from oversized groups.[/yellow]"
+                    )
 
             except ImportError:
                 console.print(

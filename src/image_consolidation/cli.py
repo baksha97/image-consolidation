@@ -273,6 +273,10 @@ def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
 
             db.finish_run(run_id, "completed")
 
+        except KeyboardInterrupt:
+            db.finish_run(run_id, "failed")
+            console.print("\n[yellow]Interrupted — run marked as failed.[/yellow]")
+            raise
         except Exception as e:
             db.finish_run(run_id, "failed")
             console.print(f"[red]Pipeline failed: {e}[/red]")

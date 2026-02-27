@@ -129,24 +129,31 @@ def run_select(db: Database, cfg: Config) -> dict:
     # ------------------------------------------------------------------
     # Files that weren't in any duplicate group — mark them best too
     # ------------------------------------------------------------------
-    singletons = db.conn.execute(
-        "SELECT id, width, height, format, exif_date, exif_make, exif_model, path, status FROM files "
-        "WHERE group_id IS NULL AND status='clustered'"
-    ).fetchall()
-
-    for row in track(singletons, description="Marking singletons…"):
-        score = compute_score(
-            width=row["width"],
-            height=row["height"],
-            fmt=row["format"] or "",
-            exif_date=row["exif_date"],
-            exif_make=row["exif_make"],
-            exif_model=row["exif_model"],
-            source_priority=cfg.source_priority(row["path"]),
-            max_source_priority=max_priority,
-        )
-        db.mark_best(row["id"], score)
-        summary["singletons"] += 1
+    last_id = -1
+    batch_size = 2000
+    while True:
+        singletons = db.conn.execute(
+            "SELECT id, width, height, format, exif_date, exif_make, exif_model, path, status "
+            "FROM files WHERE group_id IS NULL AND status='clustered' AND id > ? "
+            "ORDER BY id ASC LIMIT ?",
+            (last_id, batch_size),
+        ).fetchall()
+        if not singletons:
+            break
+        for row in track(singletons, description="Marking singletons…", transient=True):
+            score = compute_score(
+                width=row["width"],
+                height=row["height"],
+                fmt=row["format"] or "",
+                exif_date=row["exif_date"],
+                exif_make=row["exif_make"],
+                exif_model=row["exif_model"],
+                source_priority=cfg.source_priority(row["path"]),
+                max_source_priority=max_priority,
+            )
+            db.mark_best(row["id"], score)
+            summary["singletons"] += 1
+        last_id = singletons[-1]["id"]
 
     db.commit()
     return summary

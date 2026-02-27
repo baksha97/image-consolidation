@@ -284,6 +284,15 @@ class Database:
         # 2.0 s tolerance handles FAT32/older-NTFS 2-second mtime granularity
         return row["size"] == size and abs(row["mtime"] - mtime) < 2.0
 
+    def load_file_fingerprints(self) -> dict[str, tuple[int, float]]:
+        """Load {path: (size, mtime)} for all files in one query.
+
+        Used by the ingest stage to pre-filter unchanged files before
+        submitting expensive metadata extraction to the thread pool.
+        """
+        rows = self.conn.execute("SELECT path, size, mtime FROM files").fetchall()
+        return {row["path"]: (row["size"], row["mtime"]) for row in rows}
+
     def iter_files_needing_hash(self, batch: int = 1000) -> Iterator[list[sqlite3.Row]]:
         last_id = -1
         while True:
@@ -345,18 +354,23 @@ class Database:
         self.conn.commit()
 
     def iter_clustered_groups(self) -> Iterator[list[sqlite3.Row]]:
-        """Yield all files for each duplicate group (group_id NOT NULL)."""
-        group_ids = [
-            r[0]
-            for r in self.conn.execute(
-                "SELECT DISTINCT group_id FROM files WHERE group_id IS NOT NULL"
-            ).fetchall()
-        ]
-        for gid in group_ids:
-            rows = self.conn.execute(
-                "SELECT * FROM files WHERE group_id=?", (gid,)
-            ).fetchall()
-            yield rows
+        """Yield all files for each duplicate group using a single ordered scan."""
+        cursor = self.conn.execute(
+            "SELECT * FROM files WHERE group_id IS NOT NULL ORDER BY group_id ASC"
+        )
+        current_gid: int | None = None
+        current_group: list[sqlite3.Row] = []
+        for row in cursor:
+            gid = row["group_id"]
+            if gid != current_gid:
+                if current_group:
+                    yield current_group
+                current_group = [row]
+                current_gid = gid
+            else:
+                current_group.append(row)
+        if current_group:
+            yield current_group
 
     def mark_best(self, file_id: int, score: float) -> None:
         self.conn.execute(

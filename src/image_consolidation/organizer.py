@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -38,7 +37,6 @@ def _output_path(
     src: Path,
     output_dir: Path,
     exif_date: str | None,
-    mtime: float,
     structure: str,
     unsorted_dir: str,
 ) -> Path:
@@ -49,12 +47,6 @@ def _output_path(
     if m:
         year, month, day = m.group(1), m.group(2), m.group(3)
     else:
-        # Fallback to file modification time — mark as unreliable
-        dt = datetime.fromtimestamp(mtime)
-        year, month, day = str(dt.year), f"{dt.month:02d}", f"{dt.day:02d}"
-        # No EXIF → unsorted
-        if structure == "YYYY/MM":
-            return output_dir / unsorted_dir / src.name
         return output_dir / unsorted_dir / src.name
 
     if structure == "YYYY/MM/DD":
@@ -139,7 +131,6 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
                 src=src,
                 output_dir=out_dir,
                 exif_date=row["exif_date"],
-                mtime=row["mtime"],
                 structure=cfg.output.structure,
                 unsorted_dir=cfg.output.unsorted_dir,
             )

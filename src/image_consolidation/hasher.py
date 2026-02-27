@@ -39,11 +39,11 @@ def dhash(path: Path, hash_size: int = 8) -> str | None:
         return None
 
 
-def _process_file(path_str: str) -> tuple[str, str | None]:
+def _process_file(path_str: str, is_video: bool = False) -> tuple[str, str | None]:
     """Return (sha256, phash_hex_or_None) for a single path."""
     path = Path(path_str)
     fhash = sha256(path)
-    phash = dhash(path)
+    phash = None if is_video else dhash(path)
     return fhash, phash
 
 
@@ -75,7 +75,7 @@ def run_hash(db: Database, cfg: Config) -> dict:
 
             with ThreadPoolExecutor(max_workers=cfg.performance.workers) as pool:
                 future_to_id = {
-                    pool.submit(_process_file, row["path"]): row["id"]
+                    pool.submit(_process_file, row["path"], bool(row["is_video"])): row["id"]
                     for row in batch_rows
                 }
                 for future in as_completed(future_to_id):

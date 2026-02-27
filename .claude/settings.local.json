@@ -3,7 +3,8 @@
     "allow": [
       "Bash(uv init:*)",
       "Bash(uv sync:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(sqlite3:*)"
     ]
   }
 }

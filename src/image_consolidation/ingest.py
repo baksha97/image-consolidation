@@ -199,6 +199,31 @@ def run_ingest(db: Database, cfg: Config, incremental: bool = True) -> dict:
     primary_files = [f for f in all_files if f.suffix.lower() not in sidecar_ext_set]
     sidecar_files = [f for f in all_files if f.suffix.lower() in sidecar_ext_set]
 
+    # Preload fingerprints once so we can skip unchanged files before
+    # submitting any work to the thread pool.
+    fingerprints: dict[str, tuple[int, float]] = {}
+    if incremental:
+        fingerprints = db.load_file_fingerprints()
+
+    def _is_unchanged(p: Path) -> bool:
+        entry = fingerprints.get(str(p))
+        if entry is None:
+            return False
+        db_size, db_mtime = entry
+        try:
+            st = p.stat()
+            return st.st_size == db_size and abs(st.st_mtime - db_mtime) < 2.0
+        except OSError:
+            return False
+
+    # Pre-filter: only submit files that need (re-)processing
+    to_process: list[Path] = []
+    for p in primary_files:
+        if incremental and _is_unchanged(p):
+            summary["skipped"] += 1
+        else:
+            to_process.append(p)
+
     batch: list[FileRecord] = []
 
     def _flush(force: bool = False) -> None:
@@ -214,28 +239,21 @@ def run_ingest(db: Database, cfg: Config, incremental: bool = True) -> dict:
         TimeElapsedColumn(),
         transient=True,
     ) as progress:
-        task = progress.add_task("Ingesting files…", total=len(primary_files))
+        task = progress.add_task("Ingesting files…", total=len(to_process))
 
         with ThreadPoolExecutor(max_workers=cfg.performance.workers) as pool:
             futures = {
                 pool.submit(_extract_metadata, p, cfg): p
-                for p in primary_files
+                for p in to_process
             }
             for future in as_completed(futures):
                 p = futures[future]
                 try:
-                    if incremental:
-                        stat = p.stat()
-                        if db.is_file_unchanged(str(p), stat.st_size, stat.st_mtime):
-                            summary["skipped"] += 1
-                            progress.advance(task)
-                            continue
-
                     rec = future.result()
                     batch.append(rec)
                     summary["new"] += 1
                     _flush()
-                except Exception as e:
+                except Exception:
                     summary["errors"] += 1
                 progress.advance(task)
 
