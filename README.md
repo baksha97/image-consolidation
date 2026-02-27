@@ -197,6 +197,33 @@ Each run writes two files to `<output>/reports/`:
 
 The **duplicate review report** (`imgc review-dupes`) writes a separate `dup_review_TIMESTAMP.md` listing every group with a table of all members, their EXIF dates, camera, dimensions, format, size, and score — useful for spot-checking selection decisions before deleting the source.
 
+### Visual Duplicate Review Gallery
+
+For a side-by-side visual comparison of winners vs duplicates:
+
+```bash
+# Generate HTML gallery (paginated, 50 groups per page)
+uv run imgc gallery -o ~/Photos-Organized
+
+# More groups per page, sorted by most copies first
+uv run imgc gallery --per-page 100 --sort count
+
+# Generate during full pipeline run
+uv run imgc run ~/Pictures -o ~/Photos-Organized --gallery
+
+# Limit gallery size for large libraries
+uv run imgc run ~/Pictures -o ~/Photos-Organized --gallery --gallery-limit 200
+```
+
+The gallery creates a self-contained HTML file at `<output>/reports/dup_gallery_TIMESTAMP.html` with:
+
+- **Paginated view** — Only loads 50 groups at a time for fast initial render
+- **Side-by-side comparison** — Winner (green border) vs duplicates (red border)
+- **Thumbnails with lightbox** — Click to view full image
+- **Relative paths** — Works when copied/mounted on other systems
+- **Metadata comparison** — Size, resolution, format, date, camera, score
+- **Toggle options** — Hide thumbnails or duplicates to focus on winners only
+
 ---
 
 ## Performance

@@ -37,6 +37,7 @@ from .deduplicator import run_dedupe
 from .selector import run_select
 from .organizer import run_organize
 from .reporter import generate_report, generate_dup_review
+from .gallery import generate_gallery
 from .exif_checker import check_exif_mismatches
 from .exif_fixer import fix_exif_mismatches, sync_metadata_to_disk
 
@@ -251,6 +252,12 @@ def run(
     skip_report: Annotated[
         bool, typer.Option("--skip-report", help="Don't generate a report at the end.")
     ] = False,
+    gallery_after_run: Annotated[
+        bool, typer.Option("--gallery", help="Generate HTML duplicate gallery after organizing.")
+    ] = False,
+    gallery_limit: Annotated[
+        Optional[int], typer.Option("--gallery-limit", help="Max duplicate groups in gallery (default: all).", min=1)
+    ] = None,
 ) -> None:
     """[bold]Run the full pipeline[/bold]: ingest → hash → dedupe → select → organize → report."""
     cfg = _load_config(
@@ -274,10 +281,10 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    _run_pipeline(cfg, dry_run=dry_run, skip_report=skip_report)
+    _run_pipeline(cfg, dry_run=dry_run, skip_report=skip_report, gallery_after_run=gallery_after_run, gallery_limit=gallery_limit)
 
 
-def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
+def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool, gallery_after_run: bool = False, gallery_limit: int | None = None) -> None:
     _check_prerequisites(cfg)
     run_started = datetime.utcnow()
     run_summary: dict = {}
@@ -327,6 +334,16 @@ def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
                     run_summary=run_summary,
                     output_dir=cfg.output.directory,
                     run_started=run_started,
+                )
+
+            if gallery_after_run:
+                console.rule("[bold blue]Gallery[/bold blue]")
+                generate_gallery(
+                    db=db,
+                    output_dir=cfg.output.directory,
+                    items_per_page=50,
+                    sort_by="size",
+                    limit=gallery_limit,
                 )
 
             db.finish_run(run_id, "completed")
@@ -498,6 +515,39 @@ def review_dupes(
             output_dir=cfg.output.directory,
             limit=limit,
             sort_by=sort.value,
+        )
+
+
+@app.command(name="gallery")
+def gallery(
+    output: Annotated[
+        Optional[Path],
+        typer.Option("-o", "--output", help="Output directory (for report placement)."),
+    ] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    limit: Annotated[
+        Optional[int],
+        typer.Option("--limit", help="Max number of duplicate groups to include.", min=1),
+    ] = None,
+    sort: Annotated[
+        ReviewSort,
+        typer.Option("--sort", help="'size' = most wasted space first (default); 'count' = most copies first; 'suspicious' = closest scores first (least confident choices)."),
+    ] = ReviewSort.size,
+    per_page: Annotated[
+        int,
+        typer.Option("--per-page", help="Number of groups per page.", min=1, max=200),
+    ] = 50,
+) -> None:
+    """Generate an HTML gallery for visual review of duplicate groups with thumbnails."""
+    cfg = _load_config(config, db, output=output)
+    with Database(cfg.db_path) as db_conn:
+        generate_gallery(
+            db=db_conn,
+            output_dir=cfg.output.directory,
+            items_per_page=per_page,
+            sort_by=sort.value,
+            limit=limit,
         )
 
 
