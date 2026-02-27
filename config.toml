@@ -3,8 +3,7 @@
 
 [sources]
 paths = [
-    "/volume1/@home/Travis/Media/Takeout",
-    "/volume1/@home/Travis/Media/Snapchat Archive"
+    "/volume1/@home/Travis/Media/Takeout"
 ]
 
 # Optional: assign priority scores to sources.
