@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -14,10 +17,11 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TaskProgressColumn
 
 from .config import Config
 from .db import Database, FileRecord
+from .filename_parser import parse_filename_date
 
 
 # ---------------------------------------------------------------------------
-# EXIF helpers
+# Metadata helpers
 # ---------------------------------------------------------------------------
 
 _EXIF_DATE_TAGS = [
@@ -94,6 +98,55 @@ def _exif_from_exifread(path: Path) -> dict:
     return result
 
 
+def _video_metadata_ffprobe(path: Path) -> dict:
+    """Extract video metadata via ffprobe."""
+    result: dict = {}
+    if not shutil.which("ffprobe"):
+        return result
+
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", "-show_format", str(path)
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        data = json.loads(out)
+
+        # Get duration from format
+        fmt = data.get("format", {})
+        if "duration" in fmt:
+            result["duration_sec"] = float(fmt["duration"])
+        
+        # Get creation_time from format tags
+        tags = fmt.get("tags", {})
+        creation_time = tags.get("creation_time")
+        if creation_time:
+            # ffprobe creation_time is often ISO8601 UTC
+            # e.g. 2021-05-10T12:34:56.000000Z
+            try:
+                # Basic ISO parse
+                dt = datetime.fromisoformat(creation_time.replace("Z", "+00:00"))
+                # Convert to local New York time as per user request
+                from .filename_parser import LOCAL_TZ
+                result["exif_date"] = dt.astimezone(LOCAL_TZ).replace(tzinfo=None).isoformat()
+            except ValueError:
+                pass
+
+        # Get dimensions from first video stream
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "video":
+                result["width"] = int(stream.get("width", 0))
+                result["height"] = int(stream.get("height", 0))
+                # Rotate check
+                rotate = stream.get("tags", {}).get("rotate")
+                if rotate and int(rotate) in (90, 270):
+                    result["width"], result["height"] = result["height"], result["width"]
+                break
+    except Exception:
+        pass
+    return result
+
+
 def _extract_metadata(path: Path, cfg: Config) -> FileRecord:
     """Return a FileRecord for a single file. Never raises."""
     stat = path.stat()
@@ -106,6 +159,7 @@ def _extract_metadata(path: Path, cfg: Config) -> FileRecord:
         is_video=cfg.formats.is_video(path),
     )
 
+    meta: dict = {}
     if cfg.formats.is_image(path):
         meta = _exif_from_pillow(path)
 
@@ -114,13 +168,22 @@ def _extract_metadata(path: Path, cfg: Config) -> FileRecord:
             fallback = _exif_from_exifread(path)
             meta.update({k: v for k, v in fallback.items() if k not in meta})
 
-        rec.width = meta.get("width")
-        rec.height = meta.get("height")
-        rec.exif_date = meta.get("exif_date")
-        rec.exif_make = meta.get("exif_make")
-        rec.exif_model = meta.get("exif_model")
-        if meta.get("format"):
-            rec.format = meta["format"]
+    elif cfg.formats.is_video(path):
+        meta = _video_metadata_ffprobe(path)
+
+    # Common assignments
+    rec.width = meta.get("width")
+    rec.height = meta.get("height")
+    rec.exif_date = meta.get("exif_date")
+    rec.exif_make = meta.get("exif_make")
+    rec.exif_model = meta.get("exif_model")
+    rec.duration_sec = meta.get("duration_sec")
+    if meta.get("format"):
+        rec.format = meta["format"]
+
+    # Fallback to filename parsing if no date found yet
+    if not rec.exif_date:
+        rec.exif_date = parse_filename_date(str(path))
 
     return rec
 
@@ -286,6 +349,76 @@ def run_ingest(db: Database, cfg: Config, incremental: bool = True) -> dict:
                 summary["errors"] += 1
             progress.advance(sc_task)
 
+        db.commit()
+
+    return summary
+
+
+def run_backfill(db: Database, cfg: Config) -> dict:
+    """
+    Find files in DB missing metadata (exif_date or duration_sec) 
+    and re-attempt extraction without re-hashing.
+    """
+    summary = {"evaluated": 0, "updated": 0, "errors": 0}
+    
+    # Find videos missing duration or any file missing exif_date
+    query = """
+        SELECT * FROM files 
+        WHERE (is_video = 1 AND duration_sec IS NULL)
+           OR (exif_date IS NULL)
+    """
+    rows = db.conn.execute(query).fetchall()
+    summary["evaluated"] = len(rows)
+
+    if not rows:
+        return summary
+
+    batch: list[FileRecord] = []
+
+    with Progress(
+        SpinnerColumn(),
+        "[progress.description]{task.description}",
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Backfilling metadata…", total=len(rows))
+
+        for row in rows:
+            path = Path(row["path"])
+            if not path.exists():
+                progress.advance(task)
+                continue
+
+            try:
+                # Re-run extraction
+                new_rec = _extract_metadata(path, cfg)
+                
+                # Check if we actually found something new
+                changed = False
+                if new_rec.exif_date != row["exif_date"]:
+                    changed = True
+                if new_rec.duration_sec != row["duration_sec"]:
+                    changed = True
+                
+                if changed:
+                    # Update only the metadata fields to be safe
+                    db.conn.execute(
+                        """UPDATE files SET 
+                           exif_date = ?, 
+                           duration_sec = ?, 
+                           width = COALESCE(width, ?), 
+                           height = COALESCE(height, ?) 
+                           WHERE id = ?""",
+                        (new_rec.exif_date, new_rec.duration_sec, new_rec.width, new_rec.height, row["id"])
+                    )
+                    summary["updated"] += 1
+            except Exception:
+                summary["errors"] += 1
+            
+            progress.advance(task)
+        
         db.commit()
 
     return summary

@@ -407,6 +407,28 @@ class Database:
             yield rows
             last_id = rows[-1]["id"]
 
+    def iter_unsorted_files_to_promote(self, unsorted_dir: str, batch: int = 1000) -> Iterator[list[sqlite3.Row]]:
+        """Files that are in 'unsorted' but now have an exif_date."""
+        last_id = -1
+        while True:
+            # Match path containing /unsorted/ and having an exif_date
+            # status='organized' means it was already placed in the unsorted folder
+            pattern = f"%/{unsorted_dir}/%"
+            rows = self.conn.execute(
+                """SELECT * FROM files
+                   WHERE is_best=1 AND status='organized' 
+                   AND output_path LIKE ? 
+                   AND exif_date IS NOT NULL
+                   AND id > ?
+                   ORDER BY id ASC
+                   LIMIT ?""",
+                (pattern, last_id, batch),
+            ).fetchall()
+            if not rows:
+                break
+            yield rows
+            last_id = rows[-1]["id"]
+
     def mark_organized(self, file_id: int, output_path: str) -> None:
         self.conn.execute(
             "UPDATE files SET output_path=?, status='organized' WHERE id=?",

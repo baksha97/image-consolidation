@@ -20,6 +20,7 @@ from rich.progress import track
 
 from .config import Config
 from .db import Database
+from .exif_fixer import sync_single_file_metadata
 
 console = Console()
 
@@ -120,9 +121,28 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
     if not dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    for batch in db.iter_best_files(batch=cfg.performance.batch_size):
+    # Combined iterator for fresh and unsorted promotion
+    def _all_work():
+        # 1. Freshly selected files
+        yield from db.iter_best_files(batch=cfg.performance.batch_size)
+        # 2. Files in unsorted that now have dates
+        yield from db.iter_unsorted_files_to_promote(cfg.output.unsorted_dir, batch=cfg.performance.batch_size)
+
+    for batch in _all_work():
         for row in track(batch, description="Organizing…", transient=True):
-            src = Path(row["path"])
+            # Source for organized files might now be their current output_path
+            # if we are moving them OUT of unsorted.
+            is_reorganizing = False
+            if row["status"] == "organized" and row["output_path"]:
+                candidate_src = Path(row["output_path"])
+                if candidate_src.exists():
+                    src = candidate_src
+                    is_reorganizing = True
+                else:
+                    src = Path(row["path"])
+            else:
+                src = Path(row["path"])
+            
             if not src.exists():
                 summary["errors"] += 1
                 continue
@@ -134,27 +154,50 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
                 structure=cfg.output.structure,
                 unsorted_dir=cfg.output.unsorted_dir,
             )
+            
+            # Skip if already at correct destination
+            if is_reorganizing and str(dest.parent) == str(src.parent):
+                summary["skipped_already_done"] += 1
+                continue
+            
             dest = _unique_path(dest)
 
+            # Fix EXIF data before moving/copying if we have a date and it's being sorted
+            is_dest_unsorted = dest.is_relative_to(out_dir / cfg.output.unsorted_dir)
+            if not is_dest_unsorted and row["exif_date"] and not dry_run:
+                sync_single_file_metadata(src, row["exif_date"], bool(row["is_video"]))
+
             try:
-                _transfer(src, dest, mode=cfg.output.mode, dry_run=dry_run)
+                # When reorganizing within the same output disk, force 'move' 
+                # so we don't leave duplicate copies in the unsorted directory.
+                transfer_mode = "move" if is_reorganizing else cfg.output.mode
+                _transfer(src, dest, mode=transfer_mode, dry_run=dry_run)
                 summary["bytes_transferred"] += row["size"] or 0
 
-                if dest.is_relative_to(out_dir / cfg.output.unsorted_dir):
+                if is_dest_unsorted:
                     summary["unsorted"] += 1
                 else:
                     summary["organized"] += 1
 
                 if not dry_run:
                     db.mark_organized(row["id"], str(dest))
-
-                    # Move sidecars alongside their master
+                    
+                    # Also move sidecars 
                     for sc_row in db.sidecars_for(row["id"]):
-                        sc_src = Path(sc_row["path"])
+                        # If reorganizing, the sidecar should also be next to the current src
+                        if is_reorganizing:
+                            sc_src = src.parent / f"{src.stem}{sc_row['extension']}"
+                            # fallback if not found using stem
+                            if not sc_src.exists():
+                                sc_src = src.parent / f"{src.name}{sc_row['extension']}"
+                        else:
+                            sc_src = Path(sc_row["path"])
+
                         sc_dest = dest.parent / sc_src.name
                         sc_dest = _unique_path(sc_dest)
+                        
                         if sc_src.exists():
-                            _transfer(sc_src, sc_dest, mode=cfg.output.mode, dry_run=False)
+                            _transfer(sc_src, sc_dest, mode=transfer_mode, dry_run=False)
 
             except Exception as e:
                 console.print(f"[red]Error organizing {src}: {e}[/red]")

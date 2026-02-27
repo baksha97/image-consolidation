@@ -18,6 +18,7 @@ Use --fresh to force a full rerun of the ingest stage.
 from __future__ import annotations
 
 import sys
+import shutil
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -26,17 +27,18 @@ from typing import Annotated, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
+from PIL import Image
 
 from .config import Config
 from .db import Database
-from .ingest import run_ingest
+from .ingest import run_ingest, run_backfill
 from .hasher import run_hash
 from .deduplicator import run_dedupe
 from .selector import run_select
 from .organizer import run_organize
 from .reporter import generate_report
 from .exif_checker import check_exif_mismatches
-from .exif_fixer import fix_exif_mismatches
+from .exif_fixer import fix_exif_mismatches, sync_metadata_to_disk
 
 console = Console()
 
@@ -46,6 +48,41 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+
+
+def _check_prerequisites(cfg: Config) -> None:
+    """Fail fast if required external tools or library features are missing."""
+    missing = []
+
+    # 1. ffprobe check
+    if cfg.formats.include_videos and not shutil.which("ffprobe"):
+        missing.append(
+            "ffprobe is not in your PATH. It is required for extracting video metadata.\n"
+            "   [bold]Fix:[/bold] Install ffmpeg (e.g., 'brew install ffmpeg' or 'sudo apt install ffmpeg')."
+        )
+
+    # 2. exiftool check
+    if not shutil.which("exiftool"):
+        missing.append(
+            "exiftool is not in your PATH. It is required for writing metadata back to files.\n"
+            "   [bold]Fix:[/bold] Install exiftool (e.g., 'brew install exiftool' or 'sudo apt install libimage-exiftool-perl')."
+        )
+
+    # 3. Pillow HEIC support check
+    heic_extensions = {".heic", ".heif"}
+    if any(ext in cfg.formats.image_extensions for ext in heic_extensions):
+        supported = Image.registered_extensions()
+        if ".heic" not in supported and ".heif" not in supported:
+            missing.append(
+                "Pillow was built without HEIC support, or pillow-heif is not installed.\n"
+                "   [bold]Fix:[/bold] Install pillow-heif ('pip install pillow-heif') or a Pillow build with libheif."
+            )
+
+    if missing:
+        console.rule("[bold red]Prerequisite Check Failed[/bold red]", style="red")
+        for msg in missing:
+            console.print(f"• {msg}\n")
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +156,7 @@ def _load_config(
             except ValueError:
                 pass
 
+    _check_prerequisites(cfg)
     return cfg
 
 
@@ -237,6 +275,11 @@ def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
             run_summary["ingest"] = s
             _print_summary(s)
 
+            console.rule("[bold blue]Stage 1.5 — Backfill Metadata[/bold blue]")
+            s = run_backfill(db, cfg)
+            run_summary["backfill"] = s
+            _print_summary(s)
+
             console.rule("[bold blue]Stage 2/5 — Hash[/bold blue]")
             s = run_hash(db, cfg)
             run_summary["hash"] = s
@@ -320,6 +363,17 @@ def ingest(
     )
     with Database(cfg.db_path) as db_conn:
         _print_summary(run_ingest(db_conn, cfg, incremental=not fresh))
+
+
+@app.command()
+def backfill(
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+) -> None:
+    """Re-extract metadata (dates, durations) for existing DB entries without re-hashing."""
+    cfg = _load_config(config, db)
+    with Database(cfg.db_path) as db_conn:
+        _print_summary(run_backfill(db_conn, cfg))
 
 
 @app.command(name="hash")
@@ -433,6 +487,18 @@ def fix_exif(
         fix_exif_mismatches(db_conn, cfg, trust_source, dry_run)
 
 
+@app.command(name="sync-metadata")
+def sync_metadata(
+    dry_run: DryRunOpt = False,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+) -> None:
+    """Push DB metadata (exif_date) back to files that lack it (e.g. filename dates)."""
+    cfg = _load_config(config, db)
+    with Database(cfg.db_path) as db_conn:
+        _print_summary(sync_metadata_to_disk(db_conn, cfg, dry_run))
+
+
 @app.command()
 def status(
     db: DbOpt = Path("imgc.db"),
@@ -479,3 +545,7 @@ def status(
 
 def main() -> None:
     app()
+
+
+if __name__ == "__main__":
+    main()
