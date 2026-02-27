@@ -24,8 +24,10 @@ mode         = "copy"         # copy | move | hardlink
 unsorted_dir = "unsorted"     # subdirectory for files with no recoverable date
 
 [dedupe]
-phash_threshold = 8   # Hamming distance (0=identical, ≤10 = near-duplicate)
-exact_only      = false  # true = skip perceptual hash, only catch bit-identical files
+phash_threshold    = 5     # Hamming distance (0=identical, 64=anything); default 5
+exact_only         = false # true = skip perceptual hash, only catch bit-identical files
+max_date_span_days = 30    # near-dup guard: skip merge if EXIF dates > N days apart (0 = disabled)
+min_size_ratio     = 0.90  # near-dup guard: skip merge if file sizes differ by more than this ratio (0.0 = disabled)
 
 [formats]
 include_videos = true

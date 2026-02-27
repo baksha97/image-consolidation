@@ -43,7 +43,11 @@ def _process_file(path_str: str, is_video: bool = False) -> tuple[str, str | Non
     """Return (sha256, phash_hex_or_None) for a single path."""
     path = Path(path_str)
     fhash = sha256(path)
-    phash = None if is_video else dhash(path)
+    # MPO files embed two JPEG images; PIL decodes only one channel, which can
+    # produce a dHash that collides with unrelated photos.  Skip perceptual
+    # hashing for MPO so they are only deduplicated via exact SHA-256 match.
+    skip_phash = is_video or path.suffix.lower() == ".mpo"
+    phash = None if skip_phash else dhash(path)
     return fhash, phash
 
 

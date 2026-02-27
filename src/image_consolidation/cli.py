@@ -165,7 +165,6 @@ def _load_config(
             except ValueError:
                 pass
 
-    _check_prerequisites(cfg)
     return cfg
 
 
@@ -273,6 +272,7 @@ def run(
 
 
 def _run_pipeline(cfg: Config, dry_run: bool, skip_report: bool) -> None:
+    _check_prerequisites(cfg)
     run_started = datetime.utcnow()
     run_summary: dict = {}
 

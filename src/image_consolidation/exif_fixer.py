@@ -202,30 +202,6 @@ def sync_metadata_to_disk(db: Database, cfg: Config, dry_run: bool = False) -> d
                 progress.advance(task)
                 continue
 
-            exif_time = row["exif_date"].replace("-", ":").replace("T", " ")
-            
-            # Use exiftool with -wm cg to only write IF the tag doesn't exist.
-            # -wm cg: "Create new groups, don't Overwrite existing ones"
-            # However, for video, we often want to write to CreateDate or DateTimeOriginal anyway.
-            # The user's request was "update both the exif data for the photo accordingly and the exif create date for videos".
-            # If we want to be conservative, we use -wm cg. 
-            # If we want to "force" the filename date onto the file, we just write it.
-            # Let's use -wm cg to be safe (don't overwrite what might be correct EXIF).
-            
-            cmd = [
-                "exiftool", "-overwrite_original_in_place", "-m",
-                "-wm", "cg",  # Only write if tag is missing
-            ]
-
-            if row["is_video"]:
-                # Videos often use CreateDate or DateTimeOriginal
-                cmd.extend([f"-CreateDate={exif_time}", f"-DateTimeOriginal={exif_time}"])
-            else:
-                # Photos use DateTimeOriginal
-                cmd.extend([f"-DateTimeOriginal={exif_time}"])
-
-            cmd.append(str(path))
-
             if dry_run:
                 summary["updated"] += 1
                 progress.advance(task)
@@ -233,11 +209,7 @@ def sync_metadata_to_disk(db: Database, cfg: Config, dry_run: bool = False) -> d
 
             if sync_single_file_metadata(path, row["exif_date"], bool(row["is_video"])):
                 summary["updated"] += 1
-            else:
-                # If we have an error, or it wasn't updated (e.g. tag already existed)
-                # the count won't increment. 
-                pass
-            
+
             progress.advance(task)
 
     return summary
@@ -263,6 +235,6 @@ def sync_single_file_metadata(path: Path, exif_date: str, is_video: bool) -> boo
 
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        return "1 image files updated" in res.stdout
+        return "1 image files updated" in res.stdout or "1 video files updated" in res.stdout
     except subprocess.CalledProcessError:
         return False

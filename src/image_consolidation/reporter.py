@@ -26,11 +26,11 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 def _fmt_bytes(n: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if n < 1024:
             return f"{n:.1f} {unit}"
         n //= 1024
-    return f"{n:.1f} PB"
+    return f"{n:.1f} PiB"
 
 
 def _pct(part: int, total: int) -> str:

@@ -335,7 +335,9 @@ class Database:
         last_id = -1
         while True:
             rows = self.conn.execute(
-                "SELECT id, phash, file_hash FROM files WHERE phash IS NOT NULL AND is_video=0 AND id > ? ORDER BY id ASC LIMIT ?",
+                """SELECT id, phash, file_hash, exif_date, size, format
+                   FROM files WHERE phash IS NOT NULL AND is_video=0 AND id > ?
+                   ORDER BY id ASC LIMIT ?""",
                 (last_id, batch),
             ).fetchall()
             if not rows:

@@ -33,8 +33,10 @@ class OutputConfig(BaseModel):
 
 
 class DedupeConfig(BaseModel):
-    phash_threshold: int = Field(8, ge=0, le=64)
+    phash_threshold: int = Field(5, ge=0, le=64)
     exact_only: bool = False  # skip perceptual hash, only catch bit-identical files
+    max_date_span_days: int = Field(30, ge=0)  # near-dup guard: 0 = disabled
+    min_size_ratio: float = Field(0.90, ge=0.0, le=1.0)  # near-dup guard: 0.0 = disabled
 
 
 class FormatsConfig(BaseModel):

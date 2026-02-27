@@ -13,6 +13,7 @@ so the selector stage can treat every file uniformly as "best in its group".
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date as _date
 
 import numpy as np
 from rich.console import Console
@@ -157,6 +158,9 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
     # Collect all hashed files (batched to avoid huge memory usage)
     all_ids: list[int] = []
     id_to_phash: dict[int, str | None] = {}
+    id_to_date: dict[int, str | None] = {}
+    id_to_size: dict[int, int | None] = {}
+    id_to_format: dict[int, str] = {}
 
     for batch in db.iter_all_hashed_images():
         for row in batch:
@@ -164,6 +168,9 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
             fhash = row["file_hash"]
             all_ids.append(file_id)
             id_to_phash[file_id] = row["phash"]
+            id_to_date[file_id] = row["exif_date"]
+            id_to_size[file_id] = row["size"]
+            id_to_format[file_id] = (row["format"] or "").upper()
             if fhash:
                 hash_to_ids[fhash].append(file_id)
 
@@ -214,14 +221,51 @@ def run_dedupe(db: Database, cfg: Config) -> dict:
 
                 distances, indices = index.search(vectors, k)
 
+                max_span = cfg.dedupe.max_date_span_days
+                min_ratio = cfg.dedupe.min_size_ratio
+
                 for i, (dists, nbrs) in enumerate(zip(distances, indices)):
                     src_id = valid_ids[i]
+                    src_fmt = id_to_format.get(src_id, "")
+                    src_date = id_to_date.get(src_id)
+                    src_size = id_to_size.get(src_id)
+
                     for dist, nbr_idx in zip(dists, nbrs):
                         if nbr_idx == i or nbr_idx < 0:
                             continue
-                        if dist <= threshold:
-                            nbr_id = valid_ids[nbr_idx]
-                            uf.union(src_id, nbr_id)
+                        if dist > threshold:
+                            continue
+
+                        nbr_id = valid_ids[nbr_idx]
+
+                        # MPO guard: MPO embeds two JPEG channels; its dHash
+                        # can collide with unrelated single-lens photos.
+                        nbr_fmt = id_to_format.get(nbr_id, "")
+                        if (src_fmt == "MPO") != (nbr_fmt == "MPO"):
+                            continue
+
+                        # Date-span guard: photos taken more than N days apart
+                        # are almost certainly not duplicates of each other.
+                        if max_span > 0:
+                            nbr_date = id_to_date.get(nbr_id)
+                            if src_date and nbr_date:
+                                try:
+                                    d1 = _date.fromisoformat(src_date[:10])
+                                    d2 = _date.fromisoformat(nbr_date[:10])
+                                    if abs((d1 - d2).days) > max_span:
+                                        continue
+                                except ValueError:
+                                    pass
+
+                        # Size-ratio guard: a >10% size difference between two
+                        # images at the same resolution suggests different content.
+                        if min_ratio > 0.0:
+                            nbr_size = id_to_size.get(nbr_id)
+                            if src_size and nbr_size and src_size > 0 and nbr_size > 0:
+                                if min(src_size, nbr_size) / max(src_size, nbr_size) < min_ratio:
+                                    continue
+
+                        uf.union(src_id, nbr_id)
 
                 # Count distinct groups that contain ≥2 FAISS-matched members
                 near_roots: set[int] = set()

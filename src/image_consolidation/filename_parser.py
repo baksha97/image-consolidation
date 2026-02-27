@@ -86,7 +86,21 @@ def parse_filename_date(path_str: str) -> str | None:
         except (ValueError, OverflowError, OSError):
             pass
 
-    # 7. Simple YYYY-MM-DD pattern often found in various apps
+    # 7. Month-name: "Sep 21 2009", "Sep 14 2009" (local time)
+    _MONTHS = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    }
+    m = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{4})", filename, re.IGNORECASE)
+    if m:
+        try:
+            month = _MONTHS[m.group(1).lower()]
+            dt = datetime(int(m.group(3)), month, int(m.group(2)))
+            return dt.isoformat()
+        except (ValueError, OverflowError):
+            pass
+
+    # 8. Simple YYYY-MM-DD pattern often found in various apps
     m = re.search(r"(\d{4})-(\d{2})-(\d{2})", filename)
     if m:
         try:

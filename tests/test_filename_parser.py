@@ -58,6 +58,28 @@ def test_simple_date_pattern():
     filename = "IMG_2023-01-01.jpg"
     assert parse_filename_date(filename) == "2023-01-01T00:00:00"
 
+def test_macos_screenshot_noon_edge_cases():
+    # 12 PM (noon) must stay 12, not become 24
+    assert parse_filename_date("Screenshot 2022-04-10 at 12.00.00 PM.png") == "2022-04-10T12:00:00"
+    # 12 AM (midnight) must become 0, not stay 12
+    assert parse_filename_date("Screenshot 2022-04-10 at 12.00.00 AM.png") == "2022-04-10T00:00:00"
+
+def test_full_path_input():
+    # Parser should extract from the filename component of a full path
+    assert parse_filename_date("/volume1/Photos/2016-06-21_12-00-00_UTC.mp4") == "2016-06-21T08:00:00"
+    assert parse_filename_date("/Users/travis/Desktop/clipboard_2025-12-24_13-36.png") == "2025-12-24T13:36:00"
+
+def test_month_name_pattern():
+    # "Sep 21 2009" style — local time, date only
+    assert parse_filename_date("09 Elvis_ Birthday (50) - Travis - Sep 21 2009 (1).AVI") == "2009-09-21T00:00:00"
+    assert parse_filename_date("09 Elvis_ Birthday (50) - Travis - Sep 14 2009 .AVI") == "2009-09-14T00:00:00"
+    # Different months
+    assert parse_filename_date("Event - Jan 1 2010.avi") == "2010-01-01T00:00:00"
+    assert parse_filename_date("Event - Dec 31 2009.avi") == "2009-12-31T00:00:00"
+
 def test_invalid_dates():
     assert parse_filename_date("IMG_001.jpg") is None
-    assert parse_filename_date("2023-13-40.jpg") is None # Invalid month/day
+    assert parse_filename_date("MVI_2088.AVI") is None        # camera serial, no date
+    assert parse_filename_date("2023-13-01.jpg") is None      # invalid month
+    assert parse_filename_date("2023-01-40.jpg") is None      # invalid day
+    assert parse_filename_date("Feb 30 2020.jpg") is None     # invalid calendar date

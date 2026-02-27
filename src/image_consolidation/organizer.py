@@ -162,17 +162,20 @@ def run_organize(db: Database, cfg: Config, dry_run: bool = False) -> dict:
             
             dest = _unique_path(dest)
 
-            # Fix EXIF data before moving/copying if we have a date and it's being sorted
             is_dest_unsorted = dest.is_relative_to(out_dir / cfg.output.unsorted_dir)
-            if not is_dest_unsorted and row["exif_date"] and not dry_run:
-                sync_single_file_metadata(src, row["exif_date"], bool(row["is_video"]))
 
             try:
-                # When reorganizing within the same output disk, force 'move' 
+                # When reorganizing within the same output disk, force 'move'
                 # so we don't leave duplicate copies in the unsorted directory.
                 transfer_mode = "move" if is_reorganizing else cfg.output.mode
                 _transfer(src, dest, mode=transfer_mode, dry_run=dry_run)
                 summary["bytes_transferred"] += row["size"] or 0
+
+                # Write EXIF to dest after a successful transfer so a failed copy
+                # never leaves a mutated source. For hardlinks this is a no-op
+                # (same inode), but it's correct for copy and move modes.
+                if not is_dest_unsorted and row["exif_date"] and not dry_run:
+                    sync_single_file_metadata(dest, row["exif_date"], bool(row["is_video"]))
 
                 if is_dest_unsorted:
                     summary["unsorted"] += 1
