@@ -72,10 +72,19 @@ def _check_prerequisites(cfg: Config) -> None:
     heic_extensions = {".heic", ".heif"}
     if any(ext in cfg.formats.image_extensions for ext in heic_extensions):
         supported = Image.registered_extensions()
-        if ".heic" not in supported and ".heif" not in supported:
+        has_heic = ".heic" in supported or ".heif" in supported
+        
+        # Also try to import pillow_heif to be sure
+        try:
+            import pillow_heif
+            has_heic = True
+        except ImportError:
+            pass
+
+        if not has_heic:
             missing.append(
-                "Pillow was built without HEIC support, or pillow-heif is not installed.\n"
-                "   [bold]Fix:[/bold] Install pillow-heif ('pip install pillow-heif') or a Pillow build with libheif."
+                "Pillow does not have HEIC support enabled. 'pillow-heif' is required.\n"
+                "   [bold]Fix:[/bold] Run 'uv sync' or 'pip install pillow-heif' to install the dependency."
             )
 
     if missing:

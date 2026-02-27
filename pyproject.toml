@@ -5,6 +5,7 @@ description = "Clean up and organize image/video libraries at scale (~1TB)"
 requires-python = ">=3.11"
 dependencies = [
     "pillow>=10.4",
+    "pillow-heif>=0.18.0",
     "exifread>=3.0",
     "imagehash>=4.3",
     "faiss-cpu>=1.8",

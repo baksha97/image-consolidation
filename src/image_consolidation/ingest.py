@@ -13,6 +13,11 @@ from pathlib import Path
 
 import exifread
 from PIL import Image, UnidentifiedImageError
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
 from rich.progress import Progress, SpinnerColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .config import Config
