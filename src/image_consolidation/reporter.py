@@ -192,9 +192,10 @@ def generate_report(
             "|----------|-------|---------------------|------------|",
         ]
         for row in top_groups:
+            max_px = f"{row['max_px']:,}" if row['max_px'] is not None else "—"
             lines.append(
                 f"| {row['group_id']} | {row['count']} "
-                f"| {row['max_px']:,} | {_fmt_bytes(row['total_bytes'])} |"
+                f"| {max_px} | {_fmt_bytes(row['total_bytes'])} |"
             )
         lines.append("")
 
