@@ -36,7 +36,7 @@ from .hasher import run_hash
 from .deduplicator import run_dedupe
 from .selector import run_select
 from .organizer import run_organize
-from .reporter import generate_report
+from .reporter import generate_report, generate_dup_review
 from .exif_checker import check_exif_mismatches
 from .exif_fixer import fix_exif_mismatches, sync_metadata_to_disk
 
@@ -103,6 +103,12 @@ class OrganizeMode(str, Enum):
     copy = "copy"
     move = "move"
     hardlink = "hardlink"
+
+
+class ReviewSort(str, Enum):
+    size       = "size"
+    count      = "count"
+    suspicious = "suspicious"
 
 
 class FolderStructure(str, Enum):
@@ -464,6 +470,34 @@ def report(
             run_summary={},
             output_dir=cfg.output.directory,
             run_started=datetime.utcnow(),
+        )
+
+
+@app.command(name="review-dupes")
+def review_dupes(
+    output: Annotated[
+        Optional[Path],
+        typer.Option("-o", "--output", help="Output directory (for report placement)."),
+    ] = None,
+    config: ConfigOpt = None,
+    db: DbOpt = Path("imgc.db"),
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Max number of duplicate groups to include.", min=1),
+    ] = 50,
+    sort: Annotated[
+        ReviewSort,
+        typer.Option("--sort", help="'size' = most wasted space first (default); 'count' = most copies first; 'suspicious' = closest scores first (least confident choices)."),
+    ] = ReviewSort.size,
+) -> None:
+    """Generate a Markdown report listing each duplicate group with EXIF data for spot-checking."""
+    cfg = _load_config(config, db, output=output)
+    with Database(cfg.db_path) as db_conn:
+        generate_dup_review(
+            db=db_conn,
+            output_dir=cfg.output.directory,
+            limit=limit,
+            sort_by=sort.value,
         )
 
 

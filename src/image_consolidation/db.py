@@ -502,6 +502,62 @@ class Database:
                FROM files GROUP BY source ORDER BY total DESC"""
         ).fetchall()
 
+    def review_groups(self, limit: int = 50, sort_by: str = "size") -> list[dict]:
+        """Return the top duplicate groups with all member files for the review report.
+
+        sort_by:
+          'size'       — groups with the most wasted bytes first (default)
+          'count'      — groups with the most files first
+          'suspicious' — groups where winner/loser scores are closest (least confident choices first)
+        """
+        order = {
+            "count":      "file_count DESC, total_bytes DESC",
+            "suspicious": "score_gap ASC, total_bytes DESC",
+        }.get(sort_by, "total_bytes DESC")
+
+        groups = self.conn.execute(
+            f"""SELECT group_id,
+                       COUNT(*) as file_count,
+                       SUM(size) as total_bytes,
+                       MAX(score) - MIN(score) as score_gap,
+                       CASE WHEN COUNT(DISTINCT file_hash) > 1 THEN 1 ELSE 0 END as is_near_dup
+                FROM files WHERE group_id IS NOT NULL
+                GROUP BY group_id
+                ORDER BY {order}
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+        if not groups:
+            return []
+
+        group_ids = [g["group_id"] for g in groups]
+        placeholders = ",".join("?" * len(group_ids))
+        files = self.conn.execute(
+            f"""SELECT id, path, format, width, height, size, exif_date,
+                       exif_make, exif_model, score, is_best, file_hash, group_id
+                FROM files WHERE group_id IN ({placeholders})
+                ORDER BY group_id ASC, is_best DESC, score DESC""",
+            group_ids,
+        ).fetchall()
+
+        by_group: dict[int, list] = {}
+        for row in files:
+            gid = row["group_id"]
+            by_group.setdefault(gid, []).append(dict(row))
+
+        return [
+            {
+                "group_id":    g["group_id"],
+                "file_count":  g["file_count"],
+                "total_bytes": g["total_bytes"],
+                "score_gap":   g["score_gap"],
+                "is_near_dup": bool(g["is_near_dup"]),
+                "files":       by_group.get(g["group_id"], []),
+            }
+            for g in groups
+        ]
+
     def top_duplicate_groups(self, limit: int = 20) -> list[sqlite3.Row]:
         return self.conn.execute(
             """SELECT group_id,
