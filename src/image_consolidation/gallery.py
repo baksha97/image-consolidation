@@ -643,7 +643,7 @@ def _render_file_card(file_data: dict, output_dir: Path, is_winner: bool) -> str
     ✅ Kept: {output_display}
 </div>"""
     
-    return f"""<div class="file-card {role_class}" {path_attrs}>
+    return f"""<div class="file-card {role_class}" {path_attrs} onclick="openLightbox(this)">
     <img class="thumbnail" src="{img_src}" alt="" loading="lazy" data-needs-resolution="true">
     <div class="file-info">
         {paths_html}
