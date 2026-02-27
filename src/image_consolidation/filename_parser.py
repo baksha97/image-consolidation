@@ -1,12 +1,19 @@
 """Module for parsing dates from filenames when EXIF data is missing."""
 
 import re
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 from pathlib import Path
 
-# User is in New York time zone
-LOCAL_TZ = ZoneInfo("America/New_York")
+# Timezone handling with fallback - for environments without tzdata
+def _get_tz(name: str):
+    """Get a timezone by name, falling back to UTC if unavailable."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.utc
+
+LOCAL_TZ = _get_tz("America/New_York")
 
 def parse_filename_date(path_str: str) -> str | None:
     """
@@ -23,7 +30,7 @@ def parse_filename_date(path_str: str) -> str | None:
             dt_utc = datetime(
                 int(m.group(1)), int(m.group(2)), int(m.group(3)),
                 int(m.group(4)), int(m.group(5)), int(m.group(6)),
-                tzinfo=ZoneInfo("UTC")
+                tzinfo=_get_tz("UTC")
             )
             # Convert to local and then make naive to match EXIF storage convention
             return dt_utc.astimezone(LOCAL_TZ).replace(tzinfo=None).isoformat()
@@ -81,7 +88,7 @@ def parse_filename_date(path_str: str) -> str | None:
     if m:
         try:
             ts = int(m.group(1))
-            dt_utc = datetime.fromtimestamp(ts, tz=ZoneInfo("UTC"))
+            dt_utc = datetime.fromtimestamp(ts, tz=_get_tz("UTC"))
             return dt_utc.astimezone(LOCAL_TZ).replace(tzinfo=None).isoformat()
         except (ValueError, OverflowError, OSError):
             pass
