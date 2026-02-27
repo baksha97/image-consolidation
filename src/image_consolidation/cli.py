@@ -380,9 +380,9 @@ def organize(
 @app.command()
 def report(
     output: Annotated[
-        Path,
+        Optional[Path],
         typer.Option("-o", "--output", help="Output directory (for report placement)."),
-    ] = Path("output"),
+    ] = None,
     config: ConfigOpt = None,
     db: DbOpt = Path("imgc.db"),
 ) -> None:
